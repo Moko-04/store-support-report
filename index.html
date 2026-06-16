@@ -40,6 +40,8 @@ const load = (k, d) => { try { const v = localStorage.getItem('ssr_'+k); return 
 const save = (k, v) => { try { localStorage.setItem('ssr_'+k, JSON.stringify(v)); } catch {} };
 
 /* ---------- マスタ初期値 ---------- */
+const DEFAULT_STAFF = ['ゆうた', 'こたろう', 'ゆうしん'];
+const DEFAULT_STORES = ['神楽坂', '高円寺', '水道橋', '茅場町'];
 const DEFAULT_CATEGORIES = ['グリストラップ清掃','フィルター清掃','エアコン清掃','厨房清掃','排水溝清掃','その他'];
 
 /* ---------- 小物 ---------- */
@@ -573,8 +575,8 @@ function Section({ title, right, children }) {
 function App() {
   const [tab, setTab] = useState('create');
   const [masters, setMasters] = useState(() => ({
-    staff: load('staff', []),
-    stores: load('stores', []),
+    staff: load('staff', DEFAULT_STAFF),
+    stores: load('stores', DEFAULT_STORES),
     categories: load('categories', DEFAULT_CATEGORIES),
     storeDefaults: load('storeDefaults', {}), // { 店舗名: [定番カテゴリ,...] }
   }));

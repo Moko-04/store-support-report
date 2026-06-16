@@ -58,22 +58,10 @@ function doPost(e) {
       pdfUrl = 'https://drive.google.com/file/d/' + pdfFile.getId() + '/view';
     }
 
-    // --- メッセージ1：テキスト要約＋PDFリンク（確実に届く本体）---
+    // テキスト要約＋PDFリンクを1メッセージで送信（写真添付なし）
     var text = (body.text || '作業報告');
     if (pdfUrl) text += '\nPDF: ' + pdfUrl;
     pushLine_(token, to, [{ type: 'text', text: text.slice(0, 4900) }]);
-
-    // --- メッセージ2：表紙画像（best-effort。失敗してもテキストは送信済み）---
-    if (body.coverBase64) {
-      try {
-        var imgFile = folder.createFile(Utilities.newBlob(Utilities.base64Decode(body.coverBase64), 'image/jpeg', 'cover_' + stamp + '.jpg'));
-        imgFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-        var imgUrl = 'https://lh3.googleusercontent.com/d/' + imgFile.getId();
-        pushLine_(token, to, [{ type: 'image', originalContentUrl: imgUrl, previewImageUrl: imgUrl }]);
-      } catch (imgErr) {
-        // 画像は任意。Drive直リンクをLINEが弾く場合があるが、報告本体は成立しているので無視。
-      }
-    }
 
     return json({ ok: true, pdfUrl: pdfUrl });
   } catch (err) {

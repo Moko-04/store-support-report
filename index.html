@@ -49,8 +49,14 @@ const DEFAULT_CATEGORIES = ['グリストラップ清掃','フィルター清掃
 /* ---------- 小物 ---------- */
 const uid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2);
 const pad = n => String(n).padStart(2, '0');
-const nowLocalInput = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
-const fmtDate = iso => { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return iso; return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+const fmtDate = iso => {
+  if (!iso) return '';
+  const s = String(iso).slice(0, 10); // 旧 datetime-local 形式(YYYY-MM-DDTHH:MM)が来ても日付だけ取る
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())}`;
+};
 
 /* 写真を縮小してJPEG dataURLに（容量を抑える） */
 function fileToDataURL(file, maxDim = 1400, quality = 0.82) {
@@ -160,12 +166,10 @@ function blobToBase64(blob) {
 /* 完了報告を GAS 経由で LINE へ送信。成功で {ok, pdfUrl} を返す。*/
 async function sendToLine(report, pdfBlob) {
   const pdfBase64 = await blobToBase64(pdfBlob);
-  const cover = report.items.flatMap(i => i.after.concat(i.before))[0] || '';
   const payload = {
     text: lineText(report),
     filename: `報告書_${report.store}_${(report.date || '').slice(0, 10)}.pdf`,
     pdfBase64,
-    coverBase64: cover ? cover.split(',')[1] : '',
   };
   // Content-Type を text/plain にして GAS の CORS プリフライト(OPTIONS)を回避する
   const res = await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
@@ -234,7 +238,7 @@ function CreateTab({ masters, onDone }) {
   const draft = load('draft', null) || {};
   const [step, setStep] = useState(draft.step || 'info');
   const [store, setStore] = useState(draft.store || '');
-  const [date, setDate] = useState(draft.date || nowLocalInput());
+  const [date, setDate] = useState((draft.date || todayLocal()).slice(0, 10)); // 旧形式の時刻を切り捨て
   const [staff, setStaff] = useState(draft.staff || []);
   const [items, setItems] = useState(draft.items || []);
   const [editingId, setEditingId] = useState(draft.editingId || null);
@@ -270,7 +274,7 @@ function CreateTab({ masters, onDone }) {
 
   const reset = () => {
     try { localStorage.removeItem('ssr_draft'); } catch {}
-    setStep('info'); setStore(''); setDate(nowLocalInput()); setStaff([]); setItems([]); setEditingId(null); setNote('');
+    setStep('info'); setStore(''); setDate(todayLocal()); setStaff([]); setItems([]); setEditingId(null); setNote('');
   };
 
   const buildReport = () => ({
@@ -343,8 +347,8 @@ function CreateTab({ masters, onDone }) {
             <option value="">選択してください</option>
             {masters.stores.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
-          <label className="block text-xs font-bold text-gray-500 mb-1">日時</label>
-          <input type="datetime-local" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3" />
+          <label className="block text-xs font-bold text-gray-500 mb-1">日付</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3" />
           <label className="block text-xs font-bold text-gray-500 mb-1">作業担当者（複数可）</label>
           <StaffPicker staff={masters.staff} value={staff} onChange={setStaff} />
         </Section>

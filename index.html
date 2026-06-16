@@ -41,7 +41,7 @@ const save = (k, v) => { try { localStorage.setItem('ssr_'+k, JSON.stringify(v))
 
 /* ---------- マスタ初期値 ---------- */
 const DEFAULT_STAFF = ['ゆうた', 'こたろう', 'ゆうしん'];
-const DEFAULT_STORES = ['神楽坂', '高円寺', '水道橋', '茅場町'];
+const DEFAULT_STORES = ['神楽坂', '高円寺', '水道橋', '茅場町', '大塚'];
 const DEFAULT_CATEGORIES = ['グリストラップ清掃','フィルター清掃','エアコン清掃','厨房清掃','排水溝清掃','その他'];
 
 /* ---------- 小物 ---------- */
@@ -574,10 +574,16 @@ function Section({ title, right, children }) {
 /* ---------- アプリ本体 ---------- */
 function App() {
   const [tab, setTab] = useState('create');
+  // 保存済みに初期値を足し込む（空保存・新しい端末・初期値追加すべてに対応）
+  const mergeDefaults = (saved, defaults) => {
+    const arr = Array.isArray(saved) ? saved.slice() : [];
+    defaults.forEach(d => { if (!arr.includes(d)) arr.push(d); });
+    return arr;
+  };
   const [masters, setMasters] = useState(() => ({
-    staff: load('staff', DEFAULT_STAFF),
-    stores: load('stores', DEFAULT_STORES),
-    categories: load('categories', DEFAULT_CATEGORIES),
+    staff: mergeDefaults(load('staff', []), DEFAULT_STAFF),
+    stores: mergeDefaults(load('stores', []), DEFAULT_STORES),
+    categories: mergeDefaults(load('categories', []), DEFAULT_CATEGORIES),
     storeDefaults: load('storeDefaults', {}), // { 店舗名: [定番カテゴリ,...] }
   }));
   const [reports, setReports] = useState(() => load('reports', []));

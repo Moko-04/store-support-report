@@ -15,6 +15,8 @@
   input[type=number]::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
   /* スマホで下部ナビ分の余白 */
   .pb-safe { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  /* 下部ナビ＋固定の完了バー分の余白（作業項目画面で使用） */
+  .pb-action { padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
   .nav-safe { padding-bottom: env(safe-area-inset-bottom); }
   /* PDF描画用のオフスクリーン領域 */
   #pdf-stage { position:fixed; left:-10000px; top:0; }
@@ -380,7 +382,7 @@ function CreateTab({ masters, onDone }) {
 
   /* ===== ステップ② 項目一覧（タップして写真入力へ）===== */
   return (
-    <div className="max-w-xl mx-auto px-4 py-4 space-y-3 pb-safe">
+    <div className="max-w-xl mx-auto px-4 py-4 space-y-3 pb-action">
       <StepBar step={2} />
       {/* 基本情報サマリ（タップで①へ戻って修正） */}
       <button onClick={() => setStep('info')} className="w-full text-left bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3 flex items-center justify-between">
@@ -420,9 +422,14 @@ function CreateTab({ masters, onDone }) {
         <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="全体の特記事項（任意）" rows={3} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm" />
       </Section>
 
-      <button onClick={finish} disabled={!!busy} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-xl py-3.5 shadow-sm">
-        {busy || '✅ 完了して送信'}
-      </button>
+      {/* 完了して送信：画面下に固定（下部タブの上）→ スクロール不要でいつでも押せる */}
+      <div className="fixed left-0 right-0 z-10 px-4 pb-2 bg-gradient-to-t from-slate-100 via-slate-100/95 to-transparent pt-3" style={{ bottom: 'calc(64px + env(safe-area-inset-bottom))' }}>
+        <div className="max-w-xl mx-auto">
+          <button onClick={finish} disabled={!!busy} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-xl py-4 shadow-lg text-base">
+            {busy || '✅ 完了して送信'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -7,7 +7,6 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
@@ -28,17 +27,13 @@
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef } = React;
 
-/* ===== Supabase（任意）=====
-   自社Supabaseの「Project URL」と「anon(publishable)公開キー」を貼ると、
-   ログイン必須＋クラウド保存＋写真/ PDFアップロード＋LINE自動送信 が有効になります。
-   空のままだとログイン無し・ブラウザ保存のみ（PDFは端末で共有/保存）。 */
-const SUPABASE_URL  = ''; // 例: https://xxxx.supabase.co
-const SUPABASE_ANON = ''; // 例: sb_publishable_xxx（publishable 公開キーのみ。service_roleは絶対に貼らない）
-const ADMIN_EMAIL   = 't_suzuki@dart-ace.com'; // アカウント発行依頼のmailto先（自己登録は不可）
-
-const AUTH_ENABLED = /^https?:\/\//.test(SUPABASE_URL) && SUPABASE_ANON.length > 20;
-const supa = AUTH_ENABLED && window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON) : null;
-const STORAGE_BUCKET = 'reports'; // Supabase Storage のバケット名（公開バケット）
+/* ===== LINE自動送信（Google Apps Script 経由・任意）=====
+   GAS の Webアプリ URL を貼ると、完了時に PDF/写真を Google Drive に保存して
+   LINE へ自動送信します（テキスト要約＋PDFリンク＋表紙画像 best-effort）。
+   LINEトークン等の秘密は GAS 側(Script Properties)にのみ保持。ここに置くのは公開URLだけ。
+   空のままだと送信せず、端末の共有/保存にフォールバックします（オフラインでも完結）。 */
+const GAS_URL = ''; // 例: https://script.google.com/macros/s/XXXXXXXX/exec
+const LINE_ENABLED = /^https?:\/\//.test(GAS_URL);
 
 /* ---------- 永続化（localStorage・キー接頭辞 ssr_）---------- */
 const load = (k, d) => { try { const v = localStorage.getItem('ssr_'+k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -81,21 +76,7 @@ function dataURLtoBlob(dataURL) {
   return new Blob([arr], { type: mime });
 }
 
-/* ===== クラウド：マスタ保存（app_state）===== */
-const STATE_KEYS = ['staff', 'stores', 'categories', 'storeDefaults'];
-async function cloudLoad(userId) {
-  STATE_KEYS.forEach(k => localStorage.removeItem('ssr_' + k));
-  try {
-    const { data } = await supa.from('app_state').select('data').eq('user_id', userId).maybeSingle();
-    if (data && data.data) Object.entries(data.data).forEach(([k, v]) => { try { localStorage.setItem('ssr_' + k, JSON.stringify(v)); } catch {} });
-  } catch (e) { console.warn('cloudLoad', e); }
-}
-async function cloudSave(userId) {
-  const blob = {};
-  STATE_KEYS.forEach(k => { const v = localStorage.getItem('ssr_' + k); if (v != null) blob[k] = JSON.parse(v); });
-  try { await supa.from('app_state').upsert({ user_id: userId, data: blob, updated_at: new Date().toISOString() }); }
-  catch (e) { console.warn('cloudSave', e); }
-}
+/* マスタ・報告書は端末内(localStorage)にのみ保存（クラウド保存なし）。 */
 
 /* ===== PDF生成（HTMLレイアウト → html2canvas → jsPDF）===== */
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -159,11 +140,31 @@ async function makePdfBlob(report, masters) {
   return pdf.output('blob');
 }
 
-/* ===== クラウド：Storageアップロード＋LINE送信 ===== */
-async function uploadBlob(path, blob, contentType) {
-  const { error } = await supa.storage.from(STORAGE_BUCKET).upload(path, blob, { contentType, upsert: true });
-  if (error) throw error;
-  return supa.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+/* ===== LINE送信（Google Apps Script 経由）===== */
+/* Blob → base64（dataURLのプレフィックスを除いた純粋なbase64）*/
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+    fr.onerror = reject; fr.readAsDataURL(blob);
+  });
+}
+/* 完了報告を GAS 経由で LINE へ送信。成功で {ok, pdfUrl} を返す。*/
+async function sendToLine(report, pdfBlob) {
+  const pdfBase64 = await blobToBase64(pdfBlob);
+  const cover = report.items.flatMap(i => i.after.concat(i.before))[0] || '';
+  const payload = {
+    text: lineText(report),
+    filename: `報告書_${report.store}_${(report.date || '').slice(0, 10)}.pdf`,
+    pdfBase64,
+    coverBase64: cover ? cover.split(',')[1] : '',
+  };
+  // Content-Type を text/plain にして GAS の CORS プリフライト(OPTIONS)を回避する
+  const res = await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+  let out = {};
+  try { out = await res.json(); } catch {}
+  if (!res.ok || out.error) throw new Error(out.error || ('HTTP ' + res.status));
+  return out;
 }
 function lineText(r) {
   return ['【店舗サポート作業報告】',
@@ -179,25 +180,6 @@ function lineText(r) {
    UI
 ========================================================= */
 function Splash({ text }) { return <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">{text}</div>; }
-
-function Login() {
-  const [email, setEmail] = useState(''); const [pw, setPw] = useState('');
-  const [busy, setBusy] = useState(false); const [msg, setMsg] = useState('');
-  const submit = async e => { e.preventDefault(); setBusy(true); setMsg(''); const r = await supa.auth.signInWithPassword({ email, password: pw }); setBusy(false); if (r.error) setMsg(r.error.message); };
-  const mailto = `mailto:${ADMIN_EMAIL}?subject=${encodeURIComponent('店舗サポート報告アプリ アカウント発行依頼')}&body=${encodeURIComponent('お名前 / ログインに使うメールアドレス をご記入ください。')}`;
-  return (
-    <div className="min-h-screen flex items-center justify-center px-4">
-      <form onSubmit={submit} className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 w-full max-w-sm space-y-4">
-        <div className="text-center"><div className="text-3xl mb-1">🧰</div><h1 className="text-lg font-bold">店舗サポート 報告書</h1><p className="text-xs text-gray-400 mt-1">ログイン</p></div>
-        <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="メールアドレス" className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-        <input type="password" required value={pw} onChange={e => setPw(e.target.value)} placeholder="パスワード" className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-        {msg && <p className="text-xs text-red-500">{msg}</p>}
-        <button disabled={busy} type="submit" className="w-full bg-gray-900 hover:bg-gray-700 disabled:opacity-50 text-white font-bold rounded-lg py-2.5">{busy ? '…' : 'ログイン'}</button>
-        <div className="pt-3 border-t border-gray-100 text-center"><a href={mailto} className="text-xs text-blue-600 underline">アカウント発行を依頼する</a></div>
-      </form>
-    </div>
-  );
-}
 
 /* ---------- 担当チップ（複数選択可）---------- */
 function StaffPicker({ staff, value, onChange }) {
@@ -291,33 +273,32 @@ function CreateTab({ masters, onDone }) {
     try {
       setBusy('PDFを作成中…');
       const pdf = await makePdfBlob(report, masters);
-      let pdfUrl = '', imageUrl = '', sent = false;
+      const file = new File([pdf], `報告書_${report.store}_${(report.date || '').slice(0,10)}.pdf`, { type: 'application/pdf' });
+      let sent = false;
 
-      if (AUTH_ENABLED && supa) {
-        setBusy('アップロード中…');
-        const base = `${report.id}`;
-        pdfUrl = await uploadBlob(`${base}/report.pdf`, pdf, 'application/pdf');
-        const cover = report.items.flatMap(i => i.after.concat(i.before))[0];
-        if (cover) imageUrl = await uploadBlob(`${base}/cover.jpg`, dataURLtoBlob(cover), 'image/jpeg');
-        setBusy('LINEへ送信中…');
+      if (LINE_ENABLED) {
         try {
-          const { error } = await supa.functions.invoke('send-line', { body: { text: lineText(report), pdfUrl, imageUrl } });
-          if (error) throw error; sent = true;
-        } catch (e) { console.warn('send-line', e); }
-        report.pdfUrl = pdfUrl;
+          setBusy('LINEへ送信中…');
+          const out = await sendToLine(report, pdf);
+          if (out && out.pdfUrl) report.pdfUrl = out.pdfUrl;
+          sent = true;
+        } catch (e) { console.warn('sendToLine', e); }
       }
 
-      // 端末側にも常に共有/保存できるようにする（LINE未設定でも完結）
-      const file = new File([pdf], `報告書_${report.store}_${report.date.slice(0,10)}.pdf`, { type: 'application/pdf' });
-      if (!sent && navigator.canShare && navigator.canShare({ files: [file] })) {
-        setBusy(''); try { await navigator.share({ files: [file], title: '作業報告書', text: lineText(report) }); } catch {}
-      } else if (!sent) {
-        const a = document.createElement('a'); a.href = URL.createObjectURL(pdf); a.download = file.name; a.click();
+      // LINE未設定 or 送信失敗 → 端末の共有/保存にフォールバック（オフラインでも完結）
+      if (!sent) {
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          setBusy(''); try { await navigator.share({ files: [file], title: '作業報告書', text: lineText(report) }); } catch {}
+        } else {
+          const a = document.createElement('a'); a.href = URL.createObjectURL(pdf); a.download = file.name; a.click();
+        }
       }
 
       onDone(report);
       setBusy('');
-      alert(sent ? 'LINEへ送信し、保存しました。' : 'PDFを作成しました。（LINE未設定のため共有/保存で対応）');
+      alert(sent ? 'LINEへ送信し、保存しました。'
+        : (LINE_ENABLED ? 'LINE送信に失敗したため、端末の共有/保存で対応しました。'
+                        : 'PDFを作成しました。（LINE未設定のため共有/保存で対応）'));
       reset();
     } catch (e) { console.error(e); setBusy(''); alert('作成に失敗しました: ' + (e.message || e)); }
   };
@@ -565,16 +546,16 @@ function StoreDefaultsEditor({ stores, categories, value, onChange }) {
   );
 }
 
-function SettingsTab({ masters, setMasters, session }) {
+function SettingsTab({ masters, setMasters }) {
   return (
     <div className="max-w-xl mx-auto px-4 py-4 space-y-4 pb-safe">
       <ListEditor title="担当者" items={masters.staff} placeholder="担当者名" onChange={v => setMasters(m => ({ ...m, staff: v }))} />
       <ListEditor title="店舗" items={masters.stores} placeholder="店舗名" onChange={v => setMasters(m => ({ ...m, stores: v }))} />
       <OrderedListEditor title="項目カテゴリ" items={masters.categories} placeholder="カテゴリ名" note="作成画面ではこの順番で表示されます（▲▼で並べ替え）。" onChange={v => setMasters(m => ({ ...m, categories: v }))} />
       <StoreDefaultsEditor stores={masters.stores} categories={masters.categories} value={masters.storeDefaults || {}} onChange={v => setMasters(m => ({ ...m, storeDefaults: v }))} />
-      {AUTH_ENABLED
-        ? <p className="text-xs text-gray-400 px-1">ログイン中：{session?.user?.email}（マスタはクラウド同期）</p>
-        : <p className="text-xs text-gray-400 px-1">ローカル保存モード（Supabase未設定）。クラウド同期・LINE自動送信を使うには index.html 上部の SUPABASE 設定を入力してください。</p>}
+      {LINE_ENABLED
+        ? <p className="text-xs text-gray-400 px-1">LINE自動送信：有効（完了時にGAS経由で送信）。データは端末内（localStorage）に保存されます。</p>
+        : <p className="text-xs text-gray-400 px-1">ローカル保存モード。完了時のLINE自動送信を使うには index.html 上部の GAS_URL を設定してください（未設定でもPDFの共有/保存は使えます）。</p>}
     </div>
   );
 }
@@ -589,7 +570,7 @@ function Section({ title, right, children }) {
 }
 
 /* ---------- アプリ本体 ---------- */
-function App({ session }) {
+function App() {
   const [tab, setTab] = useState('create');
   const [masters, setMasters] = useState(() => ({
     staff: load('staff', []),
@@ -602,13 +583,6 @@ function App({ session }) {
   useEffect(() => { save('staff', masters.staff); save('stores', masters.stores); save('categories', masters.categories); save('storeDefaults', masters.storeDefaults); }, [masters]);
   useEffect(() => save('reports', reports), [reports]);
 
-  // マスタのクラウド保存（ログイン時・1.5秒デバウンス）
-  useEffect(() => {
-    if (!AUTH_ENABLED || !session) return;
-    const t = setTimeout(() => cloudSave(session.user.id), 1500);
-    return () => clearTimeout(t);
-  }, [masters]);
-
   const addReport = r => setReports(arr => [r, ...arr]);
   const delReport = id => setReports(arr => arr.filter(r => r.id !== id));
 
@@ -618,13 +592,12 @@ function App({ session }) {
       <header className="bg-white border-b border-gray-200 sticky top-0 z-20">
         <div className="max-w-xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="font-bold flex items-center gap-2"><span>🧰</span>店舗サポート 報告書</div>
-          {AUTH_ENABLED && session && <button onClick={() => supa.auth.signOut()} className="text-xs text-gray-500 border border-gray-300 rounded-lg px-3 py-1">ログアウト</button>}
         </div>
       </header>
 
       {tab === 'create' && <CreateTab masters={masters} onDone={addReport} />}
       {tab === 'history' && <HistoryTab reports={reports} masters={masters} onDelete={delReport} />}
-      {tab === 'settings' && <SettingsTab masters={masters} setMasters={setMasters} session={session} />}
+      {tab === 'settings' && <SettingsTab masters={masters} setMasters={setMasters} />}
 
       <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 z-20 nav-safe">
         <div className="max-w-xl mx-auto grid grid-cols-3">
@@ -640,20 +613,7 @@ function App({ session }) {
 }
 
 function Root() {
-  const [session, setSession] = useState(AUTH_ENABLED ? undefined : null);
-  const [ready, setReady] = useState(!AUTH_ENABLED);
-  useEffect(() => {
-    if (!AUTH_ENABLED) return;
-    supa.auth.getSession().then(({ data }) => setSession(data.session || null));
-    const { data: sub } = supa.auth.onAuthStateChange((_e, s) => { setSession(s); setReady(false); });
-    return () => sub.subscription.unsubscribe();
-  }, []);
-  useEffect(() => { if (!AUTH_ENABLED || !session) return; cloudLoad(session.user.id).finally(() => setReady(true)); }, [session]);
-  if (!AUTH_ENABLED) return <App session={null} />;
-  if (session === undefined) return <Splash text="読み込み中…" />;
-  if (!session) return <Login />;
-  if (!ready) return <Splash text="データを読み込み中…" />;
-  return <App key={session.user.id} session={session} />;
+  return <App />;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<Root />);

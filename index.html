@@ -296,6 +296,7 @@ function CreateTab({ masters, onDone }) {
       const pdf = await makePdfBlob(report, masters);
       const file = new File([pdf], `報告書_${report.store}_${(report.date || '').slice(0,10)}.pdf`, { type: 'application/pdf' });
       let sent = false;
+      let sendErr = '';
 
       if (LINE_ENABLED) {
         try {
@@ -303,7 +304,10 @@ function CreateTab({ masters, onDone }) {
           const out = await sendToLine(report, pdf);
           if (out && out.pdfUrl) report.pdfUrl = out.pdfUrl;
           sent = true;
-        } catch (e) { console.warn('sendToLine', e); }
+        } catch (e) {
+          console.warn('sendToLine', e);
+          sendErr = (e && e.message) ? e.message : String(e);
+        }
       }
 
       // LINE未設定 or 送信失敗 → 端末の共有/保存にフォールバック（オフラインでも完結）
@@ -318,7 +322,7 @@ function CreateTab({ masters, onDone }) {
       onDone(report);
       setBusy('');
       alert(sent ? 'LINEへ送信し、保存しました。'
-        : (LINE_ENABLED ? 'LINE送信に失敗したため、端末の共有/保存で対応しました。'
+        : (LINE_ENABLED ? `LINE送信に失敗（端末の共有/保存で対応しました）。\n\n原因: ${sendErr || '不明'}`
                         : 'PDFを作成しました。（LINE未設定のため共有/保存で対応）'));
       reset();
     } catch (e) { console.error(e); setBusy(''); alert('作成に失敗しました: ' + (e.message || e)); }

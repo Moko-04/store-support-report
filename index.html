@@ -32,7 +32,7 @@ const { useState, useEffect, useRef } = React;
    LINE へ自動送信します（テキスト要約＋PDFリンク＋表紙画像 best-effort）。
    LINEトークン等の秘密は GAS 側(Script Properties)にのみ保持。ここに置くのは公開URLだけ。
    空のままだと送信せず、端末の共有/保存にフォールバックします（オフラインでも完結）。 */
-const GAS_URL = ''; // 例: https://script.google.com/macros/s/XXXXXXXX/exec
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbxZAke1CY-GPrtxByX0u1SdXBDVuYhJqKa-auhdNXcdxtvXMsV6_n1WbaIs7wXgpXSO/exec'; // GAS WebアプリURL
 const LINE_ENABLED = /^https?:\/\//.test(GAS_URL);
 
 /* ---------- 永続化（localStorage・キー接頭辞 ssr_）---------- */

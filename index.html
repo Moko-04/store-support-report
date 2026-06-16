@@ -226,14 +226,28 @@ function PhotoRow({ label, urls, onAdd, onRemove }) {
 
 /* ---------- 作成画面（2ステップ：①基本情報 → ②作業項目）---------- */
 function CreateTab({ masters, onDone }) {
-  const [step, setStep] = useState('info'); // 'info' | 'items'
-  const [store, setStore] = useState('');
-  const [date, setDate] = useState(nowLocalInput());
-  const [staff, setStaff] = useState([]);
-  const [items, setItems] = useState([]);
-  const [editingId, setEditingId] = useState(null); // 展開中の作業項目（1つだけ）
-  const [note, setNote] = useState('');
+  // 下書き（タブ切替・ブラウザ閉じでも残るよう localStorage に自動保存）
+  const draft = load('draft', null) || {};
+  const [step, setStep] = useState(draft.step || 'info');
+  const [store, setStore] = useState(draft.store || '');
+  const [date, setDate] = useState(draft.date || nowLocalInput());
+  const [staff, setStaff] = useState(draft.staff || []);
+  const [items, setItems] = useState(draft.items || []);
+  const [editingId, setEditingId] = useState(draft.editingId || null);
+  const [note, setNote] = useState(draft.note || '');
   const [busy, setBusy] = useState('');
+
+  // 入力が変わるたび下書きを保存。容量超過時は写真を除いてテキストだけでも残す。
+  useEffect(() => {
+    const draft = { step, store, date, staff, items, editingId, note };
+    try { localStorage.setItem('ssr_draft', JSON.stringify(draft)); }
+    catch {
+      try {
+        const lite = { ...draft, items: items.map(it => ({ ...it, before: [], after: [] })) };
+        localStorage.setItem('ssr_draft', JSON.stringify(lite));
+      } catch {}
+    }
+  }, [step, store, date, staff, items, editingId, note]);
 
   const entered = it => it && (it.before.length || it.after.length); // 写真がある＝使用中
   const complete = it => it && it.before.length && it.after.length; // 施工前・後がそろっている
@@ -250,7 +264,10 @@ function CreateTab({ masters, onDone }) {
   const closeEditor = () => { setItems(arr => arr.filter(it => it.id !== editingId || entered(it))); setEditingId(null); };
   const addCustom = () => { const name = (prompt('項目名を入力') || '').trim(); if (!name) return; openCat(name); };
 
-  const reset = () => { setStep('info'); setStore(''); setDate(nowLocalInput()); setStaff([]); setItems([]); setEditingId(null); setNote(''); };
+  const reset = () => {
+    try { localStorage.removeItem('ssr_draft'); } catch {}
+    setStep('info'); setStore(''); setDate(nowLocalInput()); setStaff([]); setItems([]); setEditingId(null); setNote('');
+  };
 
   const buildReport = () => ({
     id: uid(), store, date, staff,

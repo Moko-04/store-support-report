@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<!-- HTMLを毎回最新で取りに行く（アプリ更新時に古い版が出続けるのを防ぐ）。CDNのJS/CSSはキャッシュされるので転送量は影響なし。 -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
 <title>店舗サポート 報告書</title>
 <!-- CDNはjsdelivrを優先（モバイル回線でunpkgが遅延・失敗するため切替） -->
 <script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>

@@ -3,77 +3,307 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<!-- HTMLを毎回最新で取りに行く（アプリ更新時に古い版が出続けるのを防ぐ）。CDNのJS/CSSはキャッシュされるので転送量は影響なし。 -->
+<!-- HTMLは毎回最新を取りに行く（更新しても古い画面が出続けるのを防ぐ） -->
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
+<meta name="theme-color" content="#0f172a" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="店サポ報告書" />
 <title>店舗サポート 報告書</title>
-<!-- CDNはjsdelivrを優先（モバイル回線でunpkgが遅延・失敗するため切替） -->
-<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.25.6/babel.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdn.tailwindcss.com"></script>
+
+<!--
+  軽量構成：Preact + hooks + htm（合計 約15KB）。ビルド不要・Babel不要。
+  PDF用の重いライブラリ（html2canvas / jsPDF）は「完了」を押した時だけ読み込む。
+  → モバイル回線での初回表示が速く、読み込み失敗による白画面が起きにくい。
+-->
+<script src="https://cdn.jsdelivr.net/npm/preact@10.24.3/dist/preact.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/preact@10.24.3/hooks/dist/hooks.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>
+
 <style>
-  body { background:#f1f5f9; -webkit-tap-highlight-color: transparent; }
-  input[type=number]::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
-  /* スマホで下部ナビ分の余白 */
-  .pb-safe { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
-  /* 下部ナビ＋固定の完了バー分の余白（作業項目画面で使用） */
-  .pb-action { padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
-  .nav-safe { padding-bottom: env(safe-area-inset-bottom); }
-  /* PDF描画用のオフスクリーン領域 */
-  #pdf-stage { position:fixed; left:-10000px; top:0; }
+:root{
+  --bg:#f1f5f9; --card:#ffffff; --ink:#0f172a; --muted:#64748b; --faint:#94a3b8;
+  --line:#e2e8f0; --line-strong:#cbd5e1; --field:#f8fafc;
+  --accent:#059669; --accent-dark:#047857; --accent-soft:#ecfdf5; --accent-line:#6ee7b7;
+  --warn:#d97706; --warn-soft:#fffbeb; --warn-line:#fcd34d;
+  --danger:#dc2626;
+  --nav-h:60px;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP",sans-serif;
+  font-size:15px; line-height:1.5; -webkit-tap-highlight-color:transparent; -webkit-text-size-adjust:100%;
+}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit;}
+button{cursor:pointer;}
+
+/* ---- レイアウト ---- */
+.wrap{max-width:600px;margin:0 auto;padding:16px 16px 0;}
+.pb-nav{padding-bottom:calc(var(--nav-h) + 24px + env(safe-area-inset-bottom));}
+.pb-nav-action{padding-bottom:calc(var(--nav-h) + 96px + env(safe-area-inset-bottom));}
+.stack > * + *{margin-top:12px;}
+
+.appbar{
+  position:sticky;top:0;z-index:30;background:var(--card);
+  border-bottom:1px solid var(--line);
+}
+.appbar-in{max-width:600px;margin:0 auto;padding:13px 16px;display:flex;align-items:center;gap:8px;font-weight:700;}
+
+/* ---- カード ---- */
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 1px 2px rgba(15,23,42,.04);}
+.card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.card-title{font-size:13px;font-weight:700;color:var(--muted);margin:0;}
+
+/* ---- フォーム ---- */
+.label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:0 0 5px;}
+.field{
+  width:100%;background:var(--field);border:1px solid var(--line-strong);border-radius:10px;
+  padding:11px 12px;font-size:15px;appearance:none;
+}
+.field:focus{outline:2px solid var(--accent);outline-offset:-1px;}
+select.field{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8'><path d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='2' fill='none' stroke-linecap='round'/></svg>");background-repeat:no-repeat;background-position:right 12px center;padding-right:34px;}
+textarea.field{resize:vertical;min-height:76px;}
+.gap-b{margin-bottom:12px;}
+
+/* ---- ボタン ---- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  border:1px solid transparent;border-radius:12px;padding:13px 16px;font-weight:700;font-size:15px;
+  background:var(--card);color:var(--ink);
+}
+.btn:disabled{opacity:.55;}
+.btn-block{display:flex;width:100%;}
+.btn-primary{background:var(--accent);color:#fff;box-shadow:0 2px 8px rgba(5,150,105,.25);}
+.btn-primary:active{background:var(--accent-dark);}
+.btn-dark{background:var(--ink);color:#fff;}
+.btn-outline{background:var(--card);border-color:var(--line-strong);color:#334155;}
+.btn-danger-outline{background:var(--card);border-color:#fecaca;color:var(--danger);}
+.btn-sm{padding:9px 14px;font-size:13px;border-radius:10px;}
+.btn-row{display:flex;gap:8px;}
+.btn-row > .btn{flex:1;}
+.link{background:none;border:0;padding:0;color:#2563eb;font-size:12px;text-decoration:underline;}
+.link-danger{background:none;border:0;padding:0;color:var(--danger);font-size:12px;}
+
+/* ---- チップ（担当者など） ---- */
+.chips{display:flex;flex-wrap:wrap;gap:8px;}
+.chip{
+  border:1px solid var(--line-strong);background:var(--card);color:#334155;
+  border-radius:999px;padding:8px 14px;font-size:14px;
+}
+.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff;}
+.chip-accent[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);}
+.chip-static{display:inline-flex;align-items:center;gap:6px;background:#f1f5f9;border-radius:999px;padding:6px 6px 6px 13px;font-size:14px;}
+.chip-x{width:22px;height:22px;border:0;border-radius:999px;background:var(--line-strong);color:#fff;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;}
+
+/* ---- ステップ ---- */
+.steps{display:flex;align-items:center;justify-content:center;gap:10px;padding:2px 0 4px;}
+.step{display:flex;align-items:center;gap:6px;}
+.step-n{width:24px;height:24px;border-radius:999px;background:var(--line);color:var(--muted);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+.step.on .step-n{background:var(--ink);color:#fff;}
+.step.done .step-n{background:var(--accent);color:#fff;}
+.step-t{font-size:12px;font-weight:700;color:var(--faint);}
+.step.on .step-t{color:var(--ink);}
+.step-bar{width:26px;height:2px;background:var(--line-strong);border-radius:2px;}
+
+/* ---- 項目リスト ---- */
+.item-btn{
+  display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;text-align:left;
+  background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;
+  box-shadow:0 1px 2px rgba(15,23,42,.04);
+}
+.item-btn.done{background:var(--accent-soft);border-color:var(--accent-line);}
+.item-btn.partial{background:var(--warn-soft);border-color:var(--warn-line);}
+.item-left{display:flex;align-items:center;gap:11px;min-width:0;}
+.item-mark{width:28px;height:28px;border-radius:999px;background:#f1f5f9;color:var(--faint);font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.item-btn.done .item-mark{background:var(--accent);color:#fff;}
+.item-btn.partial .item-mark{background:var(--warn);color:#fff;}
+.item-name{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.item-note{font-size:12px;color:var(--faint);flex-shrink:0;}
+.item-btn.partial .item-note{color:var(--warn);}
+.group-label{font-size:11px;font-weight:700;color:var(--accent-dark);padding:4px 4px 0;margin:0;}
+.group-label.plain{color:var(--faint);}
+.hint{font-size:12px;color:var(--faint);padding:0 4px;margin:0;}
+.btn-dashed{width:100%;border:2px dashed var(--line-strong);background:none;color:var(--muted);border-radius:12px;padding:13px;font-weight:700;font-size:14px;}
+
+/* ---- 概要バー（作成中の店舗表示） ---- */
+.summary{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;text-align:left;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:13px 16px;}
+.summary b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.summary small{display:block;color:var(--muted);font-size:12px;margin-top:2px;}
+
+/* ---- 写真 ---- */
+.photo-cols{display:flex;gap:14px;}
+.photo-col{flex:1;min-width:0;}
+.photo-grid{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;}
+.thumb{position:relative;width:76px;height:76px;}
+.thumb img{width:100%;height:100%;object-fit:cover;border-radius:10px;border:1px solid var(--line-strong);display:block;}
+.thumb-x{position:absolute;top:-7px;right:-7px;width:23px;height:23px;border-radius:999px;background:var(--ink);color:#fff;border:2px solid #fff;font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;}
+.photo-add{display:flex;flex-direction:column;gap:6px;}
+.photo-add button{width:76px;padding:8px 0;border:1px solid var(--line-strong);background:var(--card);color:var(--muted);border-radius:10px;font-size:12px;font-weight:600;}
+.req{color:var(--danger);}
+.alert-warn{background:var(--warn-soft);border:1px solid var(--warn-line);color:#92400e;font-size:12px;border-radius:10px;padding:9px 11px;margin:0 0 12px;}
+
+/* ---- 固定アクションバー ---- */
+.action-bar{
+  position:fixed;left:0;right:0;z-index:20;
+  bottom:calc(var(--nav-h) + env(safe-area-inset-bottom));
+  padding:14px 16px 12px;
+  background:linear-gradient(to top,var(--bg) 55%,rgba(241,245,249,0));
+}
+.action-in{max-width:600px;margin:0 auto;}
+
+/* ---- 下部ナビ ---- */
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);}
+.tabbar-in{max-width:600px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr);}
+.tab{background:none;border:0;padding:9px 0;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--faint);height:var(--nav-h);justify-content:center;}
+.tab .ic{font-size:19px;line-height:1;}
+.tab.on{color:var(--accent);font-weight:700;}
+.tab-dot{position:absolute;transform:translate(15px,-11px);width:7px;height:7px;border-radius:999px;background:var(--warn);}
+
+/* ---- 履歴・下書き ---- */
+.rec{display:flex;justify-content:space-between;gap:12px;}
+.rec-main{min-width:0;}
+.rec-actions{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;}
+.badge{display:inline-block;font-size:11px;font-weight:700;border-radius:999px;padding:2px 9px;background:var(--warn-soft);color:#92400e;border:1px solid var(--warn-line);}
+.badge-ok{background:var(--accent-soft);color:var(--accent-dark);border-color:var(--accent-line);}
+.empty{padding:64px 16px;text-align:center;color:var(--faint);font-size:14px;}
+
+/* ---- 並び替えリスト ---- */
+.ord{display:flex;align-items:center;gap:8px;background:var(--field);border:1px solid var(--line);border-radius:10px;padding:8px 10px;}
+.ord + .ord{margin-top:8px;}
+.ord-i{width:20px;text-align:center;color:var(--faint);font-size:12px;}
+.ord-n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;}
+.ord-b{width:30px;height:30px;border:1px solid var(--line-strong);background:var(--card);border-radius:8px;color:#475569;padding:0;}
+.ord-b:disabled{opacity:.3;}
+.inline-add{display:flex;gap:8px;margin-bottom:12px;}
+.inline-add .field{flex:1;}
+
+/* ---- 進行中オーバーレイ / トースト ---- */
+.overlay{position:fixed;inset:0;z-index:50;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:24px;}
+.overlay-box{background:var(--card);border-radius:16px;padding:26px 30px;text-align:center;min-width:220px;}
+.spinner{width:34px;height:34px;margin:0 auto 12px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:999px;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.overlay-msg{font-size:14px;font-weight:700;}
+.overlay-sub{font-size:12px;color:var(--muted);margin-top:5px;}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(var(--nav-h) + 22px + env(safe-area-inset-bottom));z-index:60;max-width:568px;margin:0 auto;background:var(--ink);color:#fff;border-radius:12px;padding:13px 16px;font-size:14px;font-weight:600;box-shadow:0 8px 24px rgba(15,23,42,.3);}
+.toast.err{background:var(--danger);}
+
+/* PDF描画用（画面外） */
+#pdf-stage{position:fixed;left:-10000px;top:0;width:760px;background:#fff;}
 </style>
 </head>
-<body class="text-gray-900">
+<body>
 <div id="root"></div>
-<div id="pdf-stage"></div>
+<div id="pdf-stage" aria-hidden="true"></div>
 
-<script type="text/babel" data-presets="react">
-const { useState, useEffect, useRef } = React;
+<script>
+/* =====================================================================
+   店舗サポート 報告書アプリ
+   - 端末内保存（IndexedDB / localStorage）。ログイン・クラウドDBなし。
+   - 完了 → PDF生成 → GAS経由でLINEへ自動送信（失敗時は端末の共有/保存）。
+   ===================================================================== */
 
-/* ===== LINE自動送信（Google Apps Script 経由・任意）=====
-   GAS の Webアプリ URL を貼ると、完了時に PDF/写真を Google Drive に保存して
-   LINE へ自動送信します（テキスト要約＋PDFリンク＋表紙画像 best-effort）。
-   LINEトークン等の秘密は GAS 側(Script Properties)にのみ保持。ここに置くのは公開URLだけ。
-   空のままだと送信せず、端末の共有/保存にフォールバックします（オフラインでも完結）。 */
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbxZAke1CY-GPrtxByX0u1SdXBDVuYhJqKa-auhdNXcdxtvXMsV6_n1WbaIs7wXgpXSO/exec'; // GAS WebアプリURL
-const LINE_ENABLED = /^https?:\/\//.test(GAS_URL);
+/* ---- LINE自動送信（Google Apps Script のWebアプリURL）----
+   秘密情報（LINEトークン・送信先ID）はGAS側のスクリプトプロパティに保持。
+   ここに置くのは公開URLのみ。空にすると送信せず端末の共有/保存にフォールバック。 */
+var GAS_URL = 'https://script.google.com/macros/s/AKfycbxZAke1CY-GPrtxByX0u1SdXBDVuYhJqKa-auhdNXcdxtvXMsV6_n1WbaIs7wXgpXSO/exec';
+var LINE_ENABLED = /^https?:\/\//.test(GAS_URL);
 
-/* ---------- 永続化（localStorage・キー接頭辞 ssr_）---------- */
-const load = (k, d) => { try { const v = localStorage.getItem('ssr_'+k); return v ? JSON.parse(v) : d; } catch { return d; } };
-const save = (k, v) => { try { localStorage.setItem('ssr_'+k, JSON.stringify(v)); } catch {} };
+/* PDF生成ライブラリ（完了を押した時だけ読み込む） */
+var LIB_HTML2CANVAS = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+var LIB_JSPDF = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js';
 
-/* ---------- マスタ初期値 ---------- */
-const DEFAULT_STAFF = ['ゆうた', 'こたろう', 'ゆうしん'];
-const DEFAULT_STORES = ['神楽坂', '高円寺', '水道橋', '茅場町', '大塚'];
-const DEFAULT_CATEGORIES = ['グリストラップ清掃','フィルター清掃','エアコン清掃','厨房清掃','排水溝清掃','その他'];
+/* ---- マスタ初期値 ---- */
+var DEFAULT_STAFF = ['ゆうた', 'こたろう', 'ゆうしん'];
+var DEFAULT_STORES = ['神楽坂', '高円寺', '水道橋', '茅場町', '大塚'];
+var DEFAULT_CATEGORIES = ['グリストラップ清掃', 'フィルター清掃', 'エアコン清掃', '厨房清掃', '排水溝清掃', 'その他'];
 
-/* ---------- 小物 ---------- */
-const uid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2);
-const pad = n => String(n).padStart(2, '0');
-const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
-const fmtDate = iso => {
-  if (!iso) return '';
-  const s = String(iso).slice(0, 10); // 旧 datetime-local 形式(YYYY-MM-DDTHH:MM)が来ても日付だけ取る
-  const d = new Date(s);
-  if (isNaN(d)) return s;
-  return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())}`;
+var h = preact.h, render = preact.render;
+var useState = preactHooks.useState, useEffect = preactHooks.useEffect,
+    useRef = preactHooks.useRef, useCallback = preactHooks.useCallback;
+var html = htm.bind(h);
+
+/* =====================================================================
+   保存まわり
+   - マスタ（小さい）: localStorage
+   - 下書き・履歴（写真を含み大きい）: IndexedDB（localStorageの5MB制限を回避）
+   ===================================================================== */
+var LS = {
+  get: function (k, d) { try { var v = localStorage.getItem('ssr_' + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set: function (k, v) { try { localStorage.setItem('ssr_' + k, JSON.stringify(v)); } catch (e) {} },
+  del: function (k) { try { localStorage.removeItem('ssr_' + k); } catch (e) {} }
 };
 
-/* 写真を縮小してJPEG dataURLに（容量を抑える） */
-function fileToDataURL(file, maxDim = 1400, quality = 0.82) {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        let { width: w, height: h } = img;
-        if (w > maxDim || h > maxDim) { const r = Math.min(maxDim / w, maxDim / h); w = Math.round(w * r); h = Math.round(h * r); }
-        const c = document.createElement('canvas'); c.width = w; c.height = h;
-        c.getContext('2d').drawImage(img, 0, 0, w, h);
+var DB_NAME = 'ssr-db', DB_STORE = 'kv';
+function idbOpen() {
+  return new Promise(function (res, rej) {
+    var r = indexedDB.open(DB_NAME, 1);
+    r.onupgradeneeded = function () { var db = r.result; if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE); };
+    r.onsuccess = function () { res(r.result); };
+    r.onerror = function () { rej(r.error); };
+  });
+}
+function idbGet(key) {
+  return idbOpen().then(function (db) {
+    return new Promise(function (res, rej) {
+      var q = db.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).get(key);
+      q.onsuccess = function () { res(q.result); };
+      q.onerror = function () { rej(q.error); };
+    });
+  });
+}
+function idbSet(key, val) {
+  return idbOpen().then(function (db) {
+    return new Promise(function (res, rej) {
+      var t = db.transaction(DB_STORE, 'readwrite');
+      t.objectStore(DB_STORE).put(val, key);
+      t.oncomplete = function () { res(); };
+      t.onerror = function () { rej(t.error); };
+    });
+  });
+}
+
+/* 旧版（localStorage保存）からの引き継ぎ。写真つきデータをIndexedDBへ移す。 */
+function migrateFromLocalStorage(kind, current) {
+  var old = LS.get(kind, null);
+  if (old == null) return current;
+  LS.del(kind);
+  var empty = kind === 'reports' ? !current || !current.length : !current;
+  return empty ? old : current;
+}
+
+/* =====================================================================
+   小物
+   ===================================================================== */
+function uid() { return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36); }
+function pad(n) { return String(n).padStart(2, '0'); }
+function todayLocal() { var d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+function fmtDate(v) {
+  if (!v) return '';
+  var s = String(v).slice(0, 10); // 旧形式(YYYY-MM-DDTHH:MM)でも日付だけ取る
+  var p = s.split('-');
+  return p.length === 3 ? p[0] + '/' + p[1] + '/' + p[2] : s;
+}
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function mergeDefaults(saved, defaults) {
+  var arr = Array.isArray(saved) ? saved.slice() : [];
+  defaults.forEach(function (d) { if (arr.indexOf(d) < 0) arr.push(d); });
+  return arr;
+}
+/* 写真を縮小してJPEGのdataURLに（容量と送信量を抑える） */
+function fileToDataURL(file, maxDim, quality) {
+  maxDim = maxDim || 1400; quality = quality || 0.82;
+  return new Promise(function (resolve, reject) {
+    var fr = new FileReader();
+    fr.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        var w = img.width, hh = img.height;
+        if (w > maxDim || hh > maxDim) { var r = Math.min(maxDim / w, maxDim / hh); w = Math.round(w * r); hh = Math.round(hh * r); }
+        var c = document.createElement('canvas'); c.width = w; c.height = hh;
+        c.getContext('2d').drawImage(img, 0, 0, w, hh);
         resolve(c.toDataURL('image/jpeg', quality));
       };
       img.onerror = reject; img.src = fr.result;
@@ -81,627 +311,693 @@ function fileToDataURL(file, maxDim = 1400, quality = 0.82) {
     fr.onerror = reject; fr.readAsDataURL(file);
   });
 }
-
-/* dataURL → Blob */
-function dataURLtoBlob(dataURL) {
-  const [head, b64] = dataURL.split(',');
-  const mime = (head.match(/:(.*?);/) || [])[1] || 'application/octet-stream';
-  const bin = atob(b64); const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return new Blob([arr], { type: mime });
+function loadScript(src) {
+  return new Promise(function (res, rej) {
+    if (document.querySelector('script[data-lib="' + src + '"]')) return res();
+    var s = document.createElement('script');
+    s.src = src; s.setAttribute('data-lib', src);
+    s.onload = function () { res(); };
+    s.onerror = function () { rej(new Error('ライブラリの読み込みに失敗しました（通信環境をご確認ください）')); };
+    document.head.appendChild(s);
+  });
+}
+function ensurePdfLibs() {
+  var jobs = [];
+  if (!window.html2canvas) jobs.push(loadScript(LIB_HTML2CANVAS));
+  if (!window.jspdf) jobs.push(loadScript(LIB_JSPDF));
+  return Promise.all(jobs);
 }
 
-/* マスタ・報告書は端末内(localStorage)にのみ保存（クラウド保存なし）。 */
+/* =====================================================================
+   PDF生成（作業項目ごとにブロック化 → 項目の途中で改ページしない）
+   ===================================================================== */
+var PDF_TH = 'border:1px solid #cbd5e1;background:#f1f5f9;padding:8px 10px;text-align:left;width:72px;white-space:nowrap;font-weight:700;';
+var PDF_TD = 'border:1px solid #cbd5e1;padding:8px 10px;';
 
-/* ===== PDF生成（HTMLレイアウト → html2canvas → jsPDF）===== */
-function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
-function photoBox(label, urls) {
-  // 写真は object-fit:contain で全体を見せる（縦撮りでも切り取らない）。
-  // 1枚=大、2枚以上=横並びでwrap。背景は灰色で余白を埋める。
-  const cells = (urls && urls.length ? urls : []).map(u =>
-    `<div style="flex:1 1 45%;min-width:0;background:#f1f5f9;border:1px solid #d1d5db;border-radius:6px;overflow:hidden;display:flex;align-items:center;justify-content:center;">
-       <img src="${u}" style="display:block;max-width:100%;max-height:300px;width:auto;height:auto;object-fit:contain;" crossorigin="anonymous"/>
-     </div>`
-  ).join('') || `<div style="flex:1;color:#9ca3af;font-size:13px;padding:32px 0;text-align:center;border:1px dashed #d1d5db;border-radius:6px;">写真なし</div>`;
-  return `<div style="flex:1;min-width:0;">
-    <div style="font-size:12px;font-weight:700;color:#475569;margin:0 0 4px;">${label}</div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:stretch;">${cells}</div></div>`;
+function pdfPhotoCol(label, urls) {
+  var cells = (urls && urls.length ? urls : []).map(function (u) {
+    return '<div style="flex:1 1 46%;min-width:0;background:#f1f5f9;border:1px solid #d1d5db;border-radius:6px;overflow:hidden;display:flex;align-items:center;justify-content:center;">' +
+      '<img src="' + u + '" style="display:block;max-width:100%;max-height:260px;width:auto;height:auto;object-fit:contain;" crossorigin="anonymous"/></div>';
+  }).join('');
+  if (!cells) cells = '<div style="flex:1;color:#9ca3af;font-size:13px;padding:30px 0;text-align:center;border:1px dashed #d1d5db;border-radius:6px;">写真なし</div>';
+  return '<div style="flex:1;min-width:0;">' +
+    '<div style="font-size:12px;font-weight:700;color:#475569;margin:0 0 5px;">' + label + '</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:stretch;">' + cells + '</div></div>';
 }
-function reportHTML(r, masters) {
-  const items = (r.items || []).map((it, i) => `
-    <div style="margin-top:14px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
-      <div style="background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:7px 12px;font-size:14px;font-weight:700;">
-        <span style="display:inline-block;background:#0f172a;color:#fff;border-radius:5px;font-size:11px;padding:1px 7px;margin-right:8px;">作業${i + 1}</span>${esc(it.category || '（未選択）')}
-      </div>
-      <div style="padding:12px;">
-        <div style="display:flex;gap:14px;">${photoBox('施工前', it.before)}${photoBox('施工後', it.after)}</div>
-        ${it.note ? `<div style="margin-top:10px;font-size:13px;color:#334155;white-space:pre-wrap;"><b style="color:#475569;">メモ：</b>${esc(it.note)}</div>` : ''}
-      </div>
-    </div>`).join('');
-  return `<div style="width:760px;background:#fff;padding:30px;font-family:'Hiragino Kaku Gothic ProN','Yu Gothic',sans-serif;color:#0f172a;box-sizing:border-box;">
-    <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #0f172a;padding-bottom:10px;margin-bottom:14px;">
-      <div style="font-size:22px;font-weight:800;letter-spacing:1px;">店舗サポート　作業報告書</div>
-      <div style="font-size:12px;color:#64748b;">店舗サポート事業部</div>
-    </div>
-    <table style="width:100%;border-collapse:collapse;font-size:14px;">
-      <tr><th style="${TH}">店舗</th><td style="${TD}">${esc(r.store)}</td><th style="${TH}">日時</th><td style="${TD}">${esc(fmtDate(r.date))}</td></tr>
-      <tr><th style="${TH}">担当</th><td style="${TD}" colspan="3">${esc((r.staff || []).join('、'))}</td></tr>
-    </table>
-    ${items || '<div style="color:#9ca3af;padding:20px;text-align:center;">作業項目なし</div>'}
-    ${r.note ? `<div style="margin-top:16px;border:1px solid #e2e8f0;border-radius:10px;padding:12px;">
-      <div style="font-size:13px;font-weight:700;color:#475569;margin-bottom:4px;">特記事項</div>
-      <div style="font-size:13px;white-space:pre-wrap;line-height:1.6;">${esc(r.note)}</div></div>` : ''}
-    <div style="margin-top:18px;text-align:right;font-size:11px;color:#94a3b8;">作成: ${esc(fmtDate(r.createdAt))}</div>
-  </div>`;
-}
-const TH = 'border:1px solid #cbd5e1;background:#f1f5f9;padding:7px 10px;text-align:left;width:70px;white-space:nowrap;font-weight:700;';
-const TD = 'border:1px solid #cbd5e1;padding:7px 10px;';
+function pdfBlocks(r) {
+  var head =
+    '<div data-block style="padding:0 0 6px;font-family:\'Hiragino Kaku Gothic ProN\',\'Yu Gothic\',sans-serif;color:#0f172a;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #0f172a;padding-bottom:10px;margin-bottom:14px;">' +
+        '<div style="font-size:22px;font-weight:800;letter-spacing:1px;">店舗サポート　作業報告書</div>' +
+        '<div style="font-size:12px;color:#64748b;">店舗サポート事業部</div>' +
+      '</div>' +
+      '<table style="width:100%;border-collapse:collapse;font-size:14px;">' +
+        '<tr><th style="' + PDF_TH + '">店舗</th><td style="' + PDF_TD + '">' + esc(r.store) + '</td>' +
+            '<th style="' + PDF_TH + '">日付</th><td style="' + PDF_TD + '">' + esc(fmtDate(r.date)) + '</td></tr>' +
+        '<tr><th style="' + PDF_TH + '">担当</th><td style="' + PDF_TD + '" colspan="3">' + esc((r.staff || []).join('、')) + '</td></tr>' +
+      '</table></div>';
 
+  var items = (r.items || []).map(function (it, i) {
+    return '<div data-block style="margin-top:12px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;font-family:\'Hiragino Kaku Gothic ProN\',\'Yu Gothic\',sans-serif;color:#0f172a;">' +
+      '<div style="background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:8px 12px;font-size:14px;font-weight:700;">' +
+        '<span style="display:inline-block;background:#0f172a;color:#fff;border-radius:5px;font-size:11px;padding:2px 8px;margin-right:8px;">作業' + (i + 1) + '</span>' + esc(it.category || '（未選択）') +
+      '</div><div style="padding:12px;">' +
+        '<div style="display:flex;gap:14px;">' + pdfPhotoCol('施工前', it.before) + pdfPhotoCol('施工後', it.after) + '</div>' +
+        (it.note ? '<div style="margin-top:10px;font-size:13px;color:#334155;white-space:pre-wrap;"><b style="color:#475569;">メモ：</b>' + esc(it.note) + '</div>' : '') +
+      '</div></div>';
+  }).join('');
+  if (!items) items = '<div data-block style="color:#9ca3af;padding:24px;text-align:center;">作業項目なし</div>';
+
+  var tail = (r.note
+    ? '<div data-block style="margin-top:14px;border:1px solid #e2e8f0;border-radius:10px;padding:12px;font-family:\'Hiragino Kaku Gothic ProN\',\'Yu Gothic\',sans-serif;">' +
+        '<div style="font-size:13px;font-weight:700;color:#475569;margin-bottom:4px;">特記事項</div>' +
+        '<div style="font-size:13px;white-space:pre-wrap;line-height:1.6;color:#0f172a;">' + esc(r.note) + '</div></div>'
+    : '') +
+    '<div data-block style="margin-top:14px;text-align:right;font-size:11px;color:#94a3b8;font-family:sans-serif;">作成: ' + esc(fmtDate(r.createdAt || r.date)) + '</div>';
+
+  return head + items + tail;
+}
 function waitImages(el) {
-  const imgs = Array.from(el.querySelectorAll('img'));
-  return Promise.all(imgs.map(im => im.complete ? Promise.resolve() : new Promise(res => { im.onload = im.onerror = res; })));
+  var imgs = Array.prototype.slice.call(el.querySelectorAll('img'));
+  return Promise.all(imgs.map(function (im) {
+    return im.complete ? Promise.resolve() : new Promise(function (res) { im.onload = im.onerror = res; });
+  }));
 }
-async function makePdfBlob(report, masters) {
-  const stage = document.getElementById('pdf-stage');
-  stage.innerHTML = reportHTML(report, masters);
-  const node = stage.firstElementChild;
-  await waitImages(node);
-  const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+async function makePdfBlob(report) {
+  await ensurePdfLibs();
+  var stage = document.getElementById('pdf-stage');
+  stage.innerHTML = '<div style="width:760px;background:#fff;padding:28px;">' + pdfBlocks(report) + '</div>';
+  var inner = stage.firstElementChild;
+  await waitImages(inner);
+
+  var jsPDF = window.jspdf.jsPDF;
+  var pdf = new jsPDF('p', 'mm', 'a4');
+  var M = 10, PW = pdf.internal.pageSize.getWidth(), PH = pdf.internal.pageSize.getHeight();
+  var CW = PW - M * 2, maxH = PH - M * 2;
+  var y = M;
+  var blocks = Array.prototype.slice.call(inner.querySelectorAll('[data-block]'));
+
+  for (var i = 0; i < blocks.length; i++) {
+    var canvas = await html2canvas(blocks[i], { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+    var hmm = canvas.height * CW / canvas.width;
+    if (hmm <= maxH) {
+      if (y + hmm > PH - M) { pdf.addPage(); y = M; }
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', M, y, CW, hmm);
+      y += hmm + 3;
+    } else {
+      // 1ページに収まらない長いブロックだけ、ページ高さで分割する
+      var pxPerMm = canvas.width / CW, sliceH = Math.floor(maxH * pxPerMm), sy = 0;
+      while (sy < canvas.height) {
+        var hpx = Math.min(sliceH, canvas.height - sy);
+        var tmp = document.createElement('canvas');
+        tmp.width = canvas.width; tmp.height = hpx;
+        tmp.getContext('2d').drawImage(canvas, 0, sy, canvas.width, hpx, 0, 0, canvas.width, hpx);
+        var hm = hpx / pxPerMm;
+        if (y + hm > PH - M) { pdf.addPage(); y = M; }
+        pdf.addImage(tmp.toDataURL('image/jpeg', 0.92), 'JPEG', M, y, CW, hm);
+        y += hm + 3; sy += hpx;
+      }
+    }
+  }
   stage.innerHTML = '';
-  const { jsPDF } = window.jspdf;
-  const pdf = new jsPDF('p', 'mm', 'a4');
-  const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight();
-  const imgW = pw, imgH = canvas.height * imgW / canvas.width;
-  const img = canvas.toDataURL('image/jpeg', 0.9);
-  let heightLeft = imgH, position = 0;
-  pdf.addImage(img, 'JPEG', 0, position, imgW, imgH); heightLeft -= ph;
-  while (heightLeft > 0) { position = heightLeft - imgH; pdf.addPage(); pdf.addImage(img, 'JPEG', 0, position, imgW, imgH); heightLeft -= ph; }
   return pdf.output('blob');
 }
 
-/* ===== LINE送信（Google Apps Script 経由）===== */
-/* Blob → base64（dataURLのプレフィックスを除いた純粋なbase64）*/
+/* =====================================================================
+   LINE送信（GAS経由）／端末での共有・保存
+   ===================================================================== */
+function lineText(r) {
+  return ['【店舗サポート作業報告】',
+    '店舗：' + (r.store || '-'),
+    '日付：' + fmtDate(r.date),
+    '担当：' + ((r.staff || []).join('、') || '-'),
+    '作業：' + ((r.items || []).map(function (i) { return i.category; }).filter(Boolean).join('、') || '-'),
+    r.note ? '特記：' + r.note : ''
+  ].filter(Boolean).join('\n');
+}
+function pdfName(r) { return '報告書_' + (r.store || '') + '_' + String(r.date || '').slice(0, 10) + '.pdf'; }
 function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
-    fr.onerror = reject; fr.readAsDataURL(blob);
+  return new Promise(function (res, rej) {
+    var fr = new FileReader();
+    fr.onload = function () { res(String(fr.result).split(',')[1] || ''); };
+    fr.onerror = rej; fr.readAsDataURL(blob);
   });
 }
-/* 完了報告を GAS 経由で LINE へ送信。成功で {ok, pdfUrl} を返す。*/
+/* GASへ送信。LINEに送るのは「テキスト要約＋PDFリンク」（写真の添付なし）。 */
 async function sendToLine(report, pdfBlob) {
-  const pdfBase64 = await blobToBase64(pdfBlob);
-  const payload = {
-    text: lineText(report),
-    filename: `報告書_${report.store}_${(report.date || '').slice(0, 10)}.pdf`,
-    pdfBase64,
-  };
-  // Content-Type を text/plain にして GAS の CORS プリフライト(OPTIONS)を回避する
-  const res = await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-  let out = {};
-  try { out = await res.json(); } catch {}
+  var pdfBase64 = await blobToBase64(pdfBlob);
+  var payload = { text: lineText(report), filename: pdfName(report), pdfBase64: pdfBase64 };
+  // text/plain にして GAS へのCORSプリフライトを避ける
+  var res = await fetch(GAS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload)
+  });
+  var out = {};
+  try { out = await res.json(); } catch (e) {}
   if (!res.ok || out.error) throw new Error(out.error || ('HTTP ' + res.status));
   return out;
 }
-function lineText(r) {
-  return ['【店舗サポート作業報告】',
-    `店舗：${r.store || '-'}`,
-    `日時：${fmtDate(r.date)}`,
-    `担当：${(r.staff || []).join('、') || '-'}`,
-    `作業：${(r.items || []).map(i => i.category).filter(Boolean).join('、') || '-'}`,
-    r.note ? `特記：${r.note}` : ''
-  ].filter(Boolean).join('\n');
+async function sharePdf(blob, name, text) {
+  var file = new File([blob], name, { type: 'application/pdf' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: '作業報告書', text: text }); return true; }
+    catch (e) { if (e && e.name === 'AbortError') return true; }
+  }
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); }, 10000);
+  return false;
 }
 
-/* =========================================================
-   UI
-========================================================= */
-function Splash({ text }) { return <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">{text}</div>; }
-
-/* ---------- 担当チップ（複数選択可）---------- */
-function StaffPicker({ staff, value, onChange }) {
-  const toggle = n => onChange(value.includes(n) ? value.filter(x => x !== n) : [...value, n]);
-  if (!staff.length) return <p className="text-xs text-gray-400">「設定」で担当者を登録してください。</p>;
-  return (
-    <div className="flex flex-wrap gap-2">
-      {staff.map(n => (
-        <button key={n} type="button" onClick={() => toggle(n)}
-          className={`px-3 py-1.5 rounded-full text-sm border ${value.includes(n) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300'}`}>{n}</button>
-      ))}
-    </div>
-  );
+/* =====================================================================
+   下書き
+   ===================================================================== */
+function emptyDraft() {
+  return { step: 'info', store: '', date: todayLocal(), staff: [], items: [], editingId: null, note: '' };
+}
+function normalizeDraft(d) {
+  if (!d) return emptyDraft();
+  return {
+    step: d.step === 'items' ? 'items' : 'info',
+    store: d.store || '',
+    date: String(d.date || todayLocal()).slice(0, 10), // 旧形式の時刻を切り捨て
+    staff: Array.isArray(d.staff) ? d.staff : [],
+    items: Array.isArray(d.items) ? d.items.map(function (it) {
+      return { id: it.id || uid(), category: it.category || '', before: it.before || [], after: it.after || [], note: it.note || '' };
+    }) : [],
+    editingId: d.editingId || null,
+    note: d.note || ''
+  };
+}
+var usedItem = function (it) { return !!(it && (it.before.length || it.after.length)); };      // 写真あり＝使用中
+var doneItem = function (it) { return !!(it && it.before.length && it.after.length); };        // 施工前後そろい
+function draftHasContent(d) {
+  return !!(d && (d.store || (d.staff && d.staff.length) || (d.items || []).some(usedItem) || d.note));
 }
 
-/* ---------- 写真追加ボタン＋サムネ ---------- */
-function PhotoRow({ label, urls, onAdd, onRemove }) {
-  const camRef = useRef(); const fileRef = useRef();
-  const handle = async e => { const files = Array.from(e.target.files || []); for (const f of files) onAdd(await fileToDataURL(f)); e.target.value = ''; };
-  return (
-    <div className="flex-1 min-w-0">
-      <div className="text-xs font-bold text-gray-500 mb-1">{label}</div>
-      <div className="flex flex-wrap gap-2 items-start">
-        {urls.map((u, i) => (
-          <div key={i} className="relative">
-            <img src={u} className="w-20 h-20 object-cover rounded-lg border border-gray-300" />
-            <button type="button" onClick={() => onRemove(i)} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-gray-900 text-white text-xs leading-none">×</button>
-          </div>
-        ))}
-        <div className="flex flex-col gap-1.5">
-          <button type="button" onClick={() => camRef.current.click()} className="w-20 h-9 rounded-lg border border-gray-300 bg-white text-gray-600 text-xs flex items-center justify-center gap-1">📷 カメラ</button>
-          <button type="button" onClick={() => fileRef.current.click()} className="w-20 h-9 rounded-lg border border-gray-300 bg-white text-gray-600 text-xs flex items-center justify-center gap-1">🖼 ファイル</button>
-        </div>
-        <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handle} />
-        <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={handle} />
+/* =====================================================================
+   共通UI
+   ===================================================================== */
+function Card(props) {
+  return html`<section class="card">
+    ${(props.title || props.right) && html`<div class="card-head">
+      <h2 class="card-title">${props.title}</h2>${props.right}</div>`}
+    ${props.children}
+  </section>`;
+}
+function Steps(props) {
+  var s = props.step;
+  return html`<div class="steps">
+    <div class=${'step ' + (s === 1 ? 'on' : s > 1 ? 'done' : '')}>
+      <span class="step-n">${s > 1 ? '✓' : '1'}</span><span class="step-t">基本情報</span></div>
+    <span class="step-bar"></span>
+    <div class=${'step ' + (s === 2 ? 'on' : '')}>
+      <span class="step-n">2</span><span class="step-t">作業項目</span></div>
+  </div>`;
+}
+function Busy(props) {
+  if (!props.msg) return null;
+  return html`<div class="overlay"><div class="overlay-box">
+    <div class="spinner"></div>
+    <div class="overlay-msg">${props.msg}</div>
+    <div class="overlay-sub">画面を閉じないでください</div>
+  </div></div>`;
+}
+function Toast(props) {
+  if (!props.toast) return null;
+  return html`<div class=${'toast' + (props.toast.err ? ' err' : '')}>${props.toast.msg}</div>`;
+}
+
+/* 担当者チップ（複数選択） */
+function StaffPicker(props) {
+  if (!props.staff.length) return html`<p class="hint">「設定」で担当者を登録してください。</p>`;
+  return html`<div class="chips">${props.staff.map(function (n) {
+    var on = props.value.indexOf(n) >= 0;
+    return html`<button key=${n} type="button" class="chip" aria-pressed=${on ? 'true' : 'false'}
+      onClick=${function () { props.onChange(on ? props.value.filter(function (x) { return x !== n; }) : props.value.concat([n])); }}>${n}</button>`;
+  })}</div>`;
+}
+
+/* 施工前／施工後の写真欄 */
+function PhotoCol(props) {
+  var camRef = useRef(), fileRef = useRef();
+  var handle = async function (e) {
+    var files = Array.prototype.slice.call(e.target.files || []);
+    var added = [];
+    for (var i = 0; i < files.length; i++) { added.push(await fileToDataURL(files[i])); }
+    e.target.value = '';
+    if (added.length) props.onAdd(added);
+  };
+  return html`<div class="photo-col">
+    <div class="label">${props.label} <span class="req">*</span></div>
+    <div class="photo-grid">
+      ${props.urls.map(function (u, i) {
+        return html`<div class="thumb" key=${i}>
+          <img src=${u} alt="" />
+          <button type="button" class="thumb-x" onClick=${function () { props.onRemove(i); }} aria-label="削除">×</button>
+        </div>`;
+      })}
+      <div class="photo-add">
+        <button type="button" onClick=${function () { camRef.current.click(); }}>📷 カメラ</button>
+        <button type="button" onClick=${function () { fileRef.current.click(); }}>🖼 ファイル</button>
       </div>
+      <input ref=${camRef} type="file" accept="image/*" capture="environment" hidden onChange=${handle} />
+      <input ref=${fileRef} type="file" accept="image/*" multiple hidden onChange=${handle} />
     </div>
-  );
+  </div>`;
 }
 
-/* ---------- 作成画面（2ステップ：①基本情報 → ②作業項目）---------- */
-function CreateTab({ masters, onDone }) {
-  // 下書き（タブ切替・ブラウザ閉じでも残るよう localStorage に自動保存）
-  const draft = load('draft', null) || {};
-  const [step, setStep] = useState(draft.step || 'info');
-  const [store, setStore] = useState(draft.store || '');
-  const [date, setDate] = useState((draft.date || todayLocal()).slice(0, 10)); // 旧形式の時刻を切り捨て
-  const [staff, setStaff] = useState(draft.staff || []);
-  const [items, setItems] = useState(draft.items || []);
-  const [editingId, setEditingId] = useState(draft.editingId || null);
-  const [note, setNote] = useState(draft.note || '');
-  const [busy, setBusy] = useState('');
+/* =====================================================================
+   作成タブ
+   ===================================================================== */
+function CreateTab(props) {
+  var masters = props.masters, draft = props.draft, patch = props.patch;
+  var store = draft.store, date = draft.date, staff = draft.staff, items = draft.items, note = draft.note;
 
-  // 入力が変わるたび下書きを保存。容量超過時は写真を除いてテキストだけでも残す。
-  useEffect(() => {
-    const draft = { step, store, date, staff, items, editingId, note };
-    try { localStorage.setItem('ssr_draft', JSON.stringify(draft)); }
-    catch {
-      try {
-        const lite = { ...draft, items: items.map(it => ({ ...it, before: [], after: [] })) };
-        localStorage.setItem('ssr_draft', JSON.stringify(lite));
-      } catch {}
-    }
-  }, [step, store, date, staff, items, editingId, note]);
-
-  const entered = it => it && (it.before.length || it.after.length); // 写真がある＝使用中
-  const complete = it => it && it.before.length && it.after.length; // 施工前・後がそろっている
-  const itemFor = cat => items.find(it => it.category === cat);
-  const updItem = (id, patch) => setItems(arr => arr.map(it => it.id === id ? { ...it, ...patch } : it));
-  const delItem = id => { setItems(arr => arr.filter(it => it.id !== id)); setEditingId(e => e === id ? null : e); };
-  // 項目名タップ → その項目の編集画面へ（無ければ作成）
-  const openCat = cat => {
-    let it = items.find(i => i.category === cat);
-    if (!it) { it = { id: uid(), category: cat, before: [], after: [], note: '' }; setItems(a => [...a, it]); }
-    setEditingId(it.id);
+  var setItems = function (fn) { patch({ items: typeof fn === 'function' ? fn(items) : fn }); };
+  var updItem = function (id, p) { setItems(function (arr) { return arr.map(function (it) { return it.id === id ? Object.assign({}, it, p) : it; }); }); };
+  var delItem = function (id) {
+    setItems(function (arr) { return arr.filter(function (it) { return it.id !== id; }); });
+    if (draft.editingId === id) patch({ editingId: null });
   };
-  // 編集画面を閉じる（未入力なら破棄して一覧に残さない）
-  const closeEditor = () => { setItems(arr => arr.filter(it => it.id !== editingId || entered(it))); setEditingId(null); };
-  const addCustom = () => { const name = (prompt('項目名を入力') || '').trim(); if (!name) return; openCat(name); };
-
-  const reset = () => {
-    try { localStorage.removeItem('ssr_draft'); } catch {}
-    setStep('info'); setStore(''); setDate(todayLocal()); setStaff([]); setItems([]); setEditingId(null); setNote('');
+  var openCat = function (cat) {
+    var it = items.filter(function (i) { return i.category === cat; })[0];
+    if (it) { patch({ editingId: it.id }); return; }
+    var neu = { id: uid(), category: cat, before: [], after: [], note: '' };
+    patch({ items: items.concat([neu]), editingId: neu.id });
+  };
+  // 編集画面を閉じる：写真が1枚も無い項目は一覧に残さない
+  var closeEditor = function () {
+    patch({ items: items.filter(function (it) { return it.id !== draft.editingId || usedItem(it); }), editingId: null });
+  };
+  var addCustom = function () {
+    var name = (prompt('項目名を入力') || '').trim();
+    if (name) openCat(name);
   };
 
-  const buildReport = () => ({
-    id: uid(), store, date, staff,
-    items: items.filter(it => it.category && entered(it)).map(({ id, ...rest }) => rest),
-    note, createdAt: new Date().toISOString()
-  });
-
-  const goItems = () => {
+  var goItems = function () {
     if (!store) { alert('店舗を選択してください。'); return; }
     if (!staff.length) { alert('担当を選択してください。'); return; }
-    setStep('items');
-  };
-  const validate = () => {
-    const used = items.filter(entered);
-    if (!used.length) return '写真を入れた項目が1つもありません。';
-    const ng = used.filter(it => !complete(it)).map(it => it.category);
-    if (ng.length) return `次の項目は施工前・施工後の両方の写真が必要です：\n${ng.join('、')}`;
-    return '';
+    patch({ step: 'items' });
   };
 
-  const finish = async () => {
-    const err = validate(); if (err) { alert(err); return; }
-    const report = buildReport();
+  /* ---------- ステップ① 基本情報 ---------- */
+  if (draft.step === 'info') {
+    return html`<div class="wrap pb-nav stack">
+      <${Steps} step=${1} />
+      <${Card} title="店舗・日付・担当">
+        <label class="label">店舗</label>
+        <select class="field gap-b" value=${store} onChange=${function (e) { patch({ store: e.target.value }); }}>
+          <option value="">選択してください</option>
+          ${masters.stores.map(function (s) { return html`<option key=${s} value=${s}>${s}</option>`; })}
+        </select>
+        <label class="label">日付</label>
+        <input type="date" class="field gap-b" value=${date} onChange=${function (e) { patch({ date: e.target.value }); }} />
+        <label class="label">作業担当者（複数可）</label>
+        <${StaffPicker} staff=${masters.staff} value=${staff} onChange=${function (v) { patch({ staff: v }); }} />
+      <//>
+      <button class="btn btn-dark btn-block" onClick=${goItems}>作業の入力へ →</button>
+    </div>`;
+  }
+
+  /* 表示順：店舗の定番 → その他 → 追加した項目 */
+  var extra = items.filter(function (it) { return masters.categories.indexOf(it.category) < 0; });
+  var storeDef = (masters.storeDefaults && masters.storeDefaults[store]) || [];
+  var defaultCats = masters.categories.filter(function (c) { return storeDef.indexOf(c) >= 0; });
+  var otherCats = masters.categories.filter(function (c) { return storeDef.indexOf(c) < 0; });
+  var orderedCats = defaultCats.concat(otherCats, extra.map(function (it) { return it.category; }));
+
+  /* ---------- ステップ② 項目の編集（写真入力） ---------- */
+  var editing = items.filter(function (it) { return it.id === draft.editingId; })[0];
+  if (editing) {
+    var idx = orderedCats.indexOf(editing.category);
+    var hasNext = idx >= 0 && idx < orderedCats.length - 1;
+    var gotoNext = function () {
+      var cur = editing, next = orderedCats[idx + 1];
+      var kept = items.filter(function (it) { return it.id !== cur.id || usedItem(it); });
+      if (!next) { patch({ items: kept, editingId: null }); return; }
+      var exist = kept.filter(function (i) { return i.category === next; })[0];
+      if (exist) { patch({ items: kept, editingId: exist.id }); return; }
+      var neu = { id: uid(), category: next, before: [], after: [], note: '' };
+      patch({ items: kept.concat([neu]), editingId: neu.id });
+    };
+    var missing = usedItem(editing) && !doneItem(editing);
+    return html`<div class="wrap pb-nav stack">
+      <button class="link" onClick=${closeEditor}>← 項目一覧へ戻る</button>
+      <${Card} title=${editing.category}
+        right=${html`<button class="link-danger" onClick=${function () { delItem(editing.id); }}>この項目を削除</button>`}>
+        <div class="photo-cols gap-b">
+          <${PhotoCol} label="施工前" urls=${editing.before}
+            onAdd=${function (us) { updItem(editing.id, { before: editing.before.concat(us) }); }}
+            onRemove=${function (i) { updItem(editing.id, { before: editing.before.filter(function (_, x) { return x !== i; }) }); }} />
+          <${PhotoCol} label="施工後" urls=${editing.after}
+            onAdd=${function (us) { updItem(editing.id, { after: editing.after.concat(us) }); }}
+            onRemove=${function (i) { updItem(editing.id, { after: editing.after.filter(function (_, x) { return x !== i; }) }); }} />
+        </div>
+        ${missing && html`<p class="alert-warn">施工前・施工後の両方の写真が必要です（* 必須）。</p>`}
+        <textarea class="field" rows="3" placeholder="この作業のメモ（任意）" value=${editing.note}
+          onInput=${function (e) { updItem(editing.id, { note: e.target.value }); }}></textarea>
+      <//>
+      <div class="btn-row">
+        <button class="btn btn-outline" onClick=${closeEditor}>一覧へ</button>
+        <button class="btn btn-primary" onClick=${gotoNext}>${hasNext ? '次の項目へ →' : '保存して一覧へ'}</button>
+      </div>
+    </div>`;
+  }
+
+  /* ---------- ステップ② 項目一覧 ---------- */
+  var row = function (cat, keyId, removable) {
+    var it = items.filter(function (i) { return i.category === cat; })[0];
+    var ok = doneItem(it), partial = usedItem(it) && !ok;
+    return html`<button key=${keyId || cat} class=${'item-btn ' + (ok ? 'done' : partial ? 'partial' : '')} onClick=${function () { openCat(cat); }}>
+      <span class="item-left">
+        <span class="item-mark">${ok ? '✓' : partial ? '!' : '＋'}</span>
+        <span class="item-name">${cat}</span>
+      </span>
+      ${removable
+        ? html`<span class="link-danger" onClick=${function (e) { e.stopPropagation(); delItem(it.id); }}>削除</span>`
+        : html`<span class="item-note">${ok ? '前' + it.before.length + '・後' + it.after.length : partial ? '写真不足' : '未入力'}</span>`}
+    </button>`;
+  };
+
+  return html`<div class="wrap pb-nav-action stack">
+    <${Steps} step=${2} />
+    <button class="summary" onClick=${function () { patch({ step: 'info' }); }}>
+      <span class="rec-main"><b>${store}</b><small>${fmtDate(date)} ・ ${staff.join('、')}</small></span>
+      <span class="link">修正</span>
+    </button>
+    <p class="hint">項目をタップして施工前・施工後の写真を追加</p>
+    ${defaultCats.length > 0 && html`<p class="group-label">★ この店舗の定番</p>`}
+    ${defaultCats.map(function (c) { return row(c); })}
+    ${defaultCats.length > 0 && otherCats.length > 0 && html`<p class="group-label plain">その他の項目</p>`}
+    ${otherCats.map(function (c) { return row(c); })}
+    ${extra.map(function (it) { return row(it.category, it.id, true); })}
+    <button class="btn-dashed" onClick=${addCustom}>＋ その他の項目を追加</button>
+    <${Card} title="特記事項">
+      <textarea class="field" rows="3" placeholder="全体の特記事項（任意）" value=${note}
+        onInput=${function (e) { patch({ note: e.target.value }); }}></textarea>
+    <//>
+    <div class="action-bar"><div class="action-in">
+      <button class="btn btn-primary btn-block" onClick=${props.onFinish}>✅ 完了して送信</button>
+    </div></div>
+  </div>`;
+}
+
+/* =====================================================================
+   作成中（下書き）タブ
+   ===================================================================== */
+function DraftsTab(props) {
+  var d = props.draft;
+  if (!draftHasContent(d)) return html`<div class="empty">作成中の報告書はありません。</div>`;
+  var used = (d.items || []).filter(usedItem);
+  return html`<div class="wrap pb-nav stack">
+    <${Card}>
+      <div class="gap-b"><span class="badge">作成中</span>
+        <span class="hint" style="display:inline;margin-left:8px;">自動保存されています</span></div>
+      <div style="font-weight:700;font-size:16px;">${d.store || '（店舗未選択）'}</div>
+      <small style="color:var(--muted);font-size:12px;">${fmtDate(d.date)} ・ ${(d.staff || []).join('、') || '担当未選択'}</small>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px;">
+        ${used.length ? '作業 ' + used.length + ' 件：' + used.map(function (i) { return i.category; }).join('、') : '作業未入力'}
+      </div>
+      ${d.note && html`<div style="font-size:12px;color:var(--muted);margin-top:4px;">特記：${d.note}</div>`}
+      <div class="btn-row" style="margin-top:16px;">
+        <button class="btn btn-primary" onClick=${props.onResume}>続きから編集</button>
+        <button class="btn btn-danger-outline" style="flex:0 0 auto;" onClick=${props.onDelete}>削除</button>
+      </div>
+    <//>
+  </div>`;
+}
+
+/* =====================================================================
+   履歴タブ
+   ===================================================================== */
+function HistoryTab(props) {
+  if (!props.reports.length) return html`<div class="empty">まだ報告書がありません。</div>`;
+  return html`<div class="wrap pb-nav stack">
+    ${props.reports.map(function (r) {
+      return html`<${Card} key=${r.id}>
+        <div class="rec">
+          <div class="rec-main">
+            <div style="font-weight:700;">${r.store || '（店舗未設定）'}</div>
+            <small style="color:var(--muted);font-size:12px;">${fmtDate(r.date)} ・ ${(r.staff || []).join('、')}</small>
+            <div style="font-size:12px;color:var(--faint);margin-top:4px;">
+              ${(r.items || []).map(function (i) { return i.category; }).filter(Boolean).join('、')}</div>
+            ${r.sent && html`<div style="margin-top:6px;"><span class="badge badge-ok">LINE送信済み</span></div>`}
+          </div>
+          <div class="rec-actions">
+            <button class="link" onClick=${function () { props.onReshare(r); }}>PDF共有</button>
+            ${r.pdfUrl && html`<a class="link" href=${r.pdfUrl} target="_blank" rel="noopener">PDFを開く</a>`}
+            <button class="link-danger" onClick=${function () { if (confirm('この報告書を削除しますか？')) props.onDelete(r.id); }}>削除</button>
+          </div>
+        </div>
+      <//>`;
+    })}
+  </div>`;
+}
+
+/* =====================================================================
+   設定タブ
+   ===================================================================== */
+function ListEditor(props) {
+  var st = useState(''), v = st[0], setV = st[1];
+  var add = function () {
+    var t = v.trim();
+    if (t && props.items.indexOf(t) < 0) props.onChange(props.items.concat([t]));
+    setV('');
+  };
+  return html`<${Card} title=${props.title}>
+    <div class="inline-add">
+      <input class="field" placeholder=${props.placeholder} value=${v}
+        onInput=${function (e) { setV(e.target.value); }}
+        onKeyDown=${function (e) { if (e.key === 'Enter') add(); }} />
+      <button class="btn btn-dark btn-sm" onClick=${add}>追加</button>
+    </div>
+    <div class="chips">
+      ${props.items.length === 0 && html`<span class="hint">未登録</span>`}
+      ${props.items.map(function (n) {
+        return html`<span class="chip-static" key=${n}>${n}
+          <button class="chip-x" onClick=${function () { props.onChange(props.items.filter(function (x) { return x !== n; })); }} aria-label="削除">×</button>
+        </span>`;
+      })}
+    </div>
+  <//>`;
+}
+function OrderedEditor(props) {
+  var st = useState(''), v = st[0], setV = st[1];
+  var add = function () {
+    var t = v.trim();
+    if (t && props.items.indexOf(t) < 0) props.onChange(props.items.concat([t]));
+    setV('');
+  };
+  var move = function (i, d) {
+    var j = i + d; if (j < 0 || j >= props.items.length) return;
+    var a = props.items.slice(); var tmp = a[i]; a[i] = a[j]; a[j] = tmp; props.onChange(a);
+  };
+  return html`<${Card} title=${props.title}>
+    <p class="hint gap-b" style="padding:0;">${props.note}</p>
+    <div class="inline-add">
+      <input class="field" placeholder=${props.placeholder} value=${v}
+        onInput=${function (e) { setV(e.target.value); }}
+        onKeyDown=${function (e) { if (e.key === 'Enter') add(); }} />
+      <button class="btn btn-dark btn-sm" onClick=${add}>追加</button>
+    </div>
+    ${props.items.length === 0 && html`<span class="hint">未登録</span>`}
+    ${props.items.map(function (n, i) {
+      return html`<div class="ord" key=${n}>
+        <span class="ord-i">${i + 1}</span>
+        <span class="ord-n">${n}</span>
+        <button class="ord-b" disabled=${i === 0} onClick=${function () { move(i, -1); }}>▲</button>
+        <button class="ord-b" disabled=${i === props.items.length - 1} onClick=${function () { move(i, 1); }}>▼</button>
+        <button class="link-danger" onClick=${function () { props.onChange(props.items.filter(function (_, x) { return x !== i; })); }}>削除</button>
+      </div>`;
+    })}
+  <//>`;
+}
+function StoreDefaultsEditor(props) {
+  var st = useState(props.stores[0] || ''), sel = st[0], setSel = st[1];
+  useEffect(function () { if (props.stores.indexOf(sel) < 0) setSel(props.stores[0] || ''); }, [props.stores]);
+  if (!props.stores.length) return html`<${Card} title="店舗ごとの定番項目"><p class="hint">先に店舗を登録してください。</p><//>`;
+  var cur = props.value[sel] || [];
+  return html`<${Card} title="店舗ごとの定番項目">
+    <p class="hint gap-b" style="padding:0;">店舗を選び、よくやる項目をオンにすると、作成時にその店舗の上部へ「★定番」としてまとめて表示されます。</p>
+    <select class="field gap-b" value=${sel} onChange=${function (e) { setSel(e.target.value); }}>
+      ${props.stores.map(function (s) { return html`<option key=${s} value=${s}>${s}</option>`; })}
+    </select>
+    <div class="chips">
+      ${props.categories.length === 0 && html`<span class="hint">先に項目カテゴリを登録してください。</span>`}
+      ${props.categories.map(function (c) {
+        var on = cur.indexOf(c) >= 0;
+        return html`<button key=${c} class="chip chip-accent" aria-pressed=${on ? 'true' : 'false'} onClick=${function () {
+          var next = on ? cur.filter(function (x) { return x !== c; }) : cur.concat([c]);
+          var v = Object.assign({}, props.value); v[sel] = next; props.onChange(v);
+        }}>${on ? '★ ' : ''}${c}</button>`;
+      })}
+    </div>
+  <//>`;
+}
+function SettingsTab(props) {
+  var m = props.masters, set = props.setMasters;
+  return html`<div class="wrap pb-nav stack">
+    <${ListEditor} title="担当者" items=${m.staff} placeholder="担当者名"
+      onChange=${function (v) { set(function (x) { return Object.assign({}, x, { staff: v }); }); }} />
+    <${ListEditor} title="店舗" items=${m.stores} placeholder="店舗名"
+      onChange=${function (v) { set(function (x) { return Object.assign({}, x, { stores: v }); }); }} />
+    <${OrderedEditor} title="項目カテゴリ" items=${m.categories} placeholder="カテゴリ名"
+      note="作成画面ではこの順番で表示されます（▲▼で並べ替え）。"
+      onChange=${function (v) { set(function (x) { return Object.assign({}, x, { categories: v }); }); }} />
+    <${StoreDefaultsEditor} stores=${m.stores} categories=${m.categories} value=${m.storeDefaults || {}}
+      onChange=${function (v) { set(function (x) { return Object.assign({}, x, { storeDefaults: v }); }); }} />
+    <p class="hint" style="padding:4px;">
+      ${LINE_ENABLED
+        ? '完了時にLINEへ自動送信します。データは端末内に保存されます。'
+        : 'ローカル保存モード（LINE未設定）。完了時はPDFの共有/保存で対応します。'}
+    </p>
+  </div>`;
+}
+
+/* =====================================================================
+   アプリ本体
+   ===================================================================== */
+var TABS = [['create', '作成', '📝'], ['drafts', '作成中', '📋'], ['history', '履歴', '🗂'], ['settings', '設定', '⚙️']];
+
+function App() {
+  var t0 = useState('create'), tab = t0[0], setTab = t0[1];
+  var t1 = useState(false), ready = t1[0], setReady = t1[1];
+  var t2 = useState(null), draft = t2[0], setDraft = t2[1];
+  var t3 = useState([]), reports = t3[0], setReports = t3[1];
+  var t4 = useState(''), busy = t4[0], setBusy = t4[1];
+  var t5 = useState(null), toast = t5[0], setToast = t5[1];
+  var t6 = useState(function () {
+    return {
+      staff: mergeDefaults(LS.get('staff', []), DEFAULT_STAFF),
+      stores: mergeDefaults(LS.get('stores', []), DEFAULT_STORES),
+      categories: mergeDefaults(LS.get('categories', []), DEFAULT_CATEGORIES),
+      storeDefaults: LS.get('storeDefaults', {})
+    };
+  }), masters = t6[0], setMasters = t6[1];
+
+  var say = useCallback(function (msg, err) {
+    setToast({ msg: msg, err: !!err });
+    setTimeout(function () { setToast(null); }, err ? 6000 : 3500);
+  }, []);
+
+  /* 起動時：IndexedDBから読み込み（旧版のlocalStorageデータがあれば引き継ぐ） */
+  useEffect(function () {
+    Promise.all([idbGet('draft'), idbGet('reports')]).then(function (r) {
+      setDraft(normalizeDraft(migrateFromLocalStorage('draft', r[0])));
+      setReports(migrateFromLocalStorage('reports', r[1]) || []);
+      setReady(true);
+    }).catch(function () {
+      // IndexedDBが使えない環境ではlocalStorageのみで動かす
+      setDraft(normalizeDraft(LS.get('draft', null)));
+      setReports(LS.get('reports', []) || []);
+      setReady(true);
+    });
+  }, []);
+
+  /* マスタ保存 */
+  useEffect(function () {
+    LS.set('staff', masters.staff); LS.set('stores', masters.stores);
+    LS.set('categories', masters.categories); LS.set('storeDefaults', masters.storeDefaults);
+  }, [masters]);
+
+  /* 下書き自動保存（入力のたびに保存。写真を含むのでIndexedDB） */
+  useEffect(function () {
+    if (!ready || !draft) return;
+    var t = setTimeout(function () { idbSet('draft', draft).catch(function () {}); }, 300);
+    return function () { clearTimeout(t); };
+  }, [draft, ready]);
+
+  /* 履歴保存 */
+  useEffect(function () {
+    if (!ready) return;
+    idbSet('reports', reports).catch(function () {});
+  }, [reports, ready]);
+
+  var patch = useCallback(function (p) { setDraft(function (d) { return Object.assign({}, d, p); }); }, []);
+  var clearDraft = function () { setDraft(emptyDraft()); idbSet('draft', emptyDraft()).catch(function () {}); };
+
+  /* 完了して送信 */
+  var finish = async function () {
+    var used = draft.items.filter(usedItem);
+    if (!used.length) { alert('写真を入れた項目が1つもありません。'); return; }
+    var ng = used.filter(function (it) { return !doneItem(it); }).map(function (it) { return it.category; });
+    if (ng.length) { alert('次の項目は施工前・施工後の両方の写真が必要です：\n' + ng.join('、')); return; }
+
+    var report = {
+      id: uid(), store: draft.store, date: draft.date, staff: draft.staff,
+      items: used.map(function (it) { return { category: it.category, before: it.before, after: it.after, note: it.note }; }),
+      note: draft.note, createdAt: todayLocal()
+    };
+
     try {
       setBusy('PDFを作成中…');
-      const pdf = await makePdfBlob(report, masters);
-      const file = new File([pdf], `報告書_${report.store}_${(report.date || '').slice(0,10)}.pdf`, { type: 'application/pdf' });
-      let sent = false;
-      let sendErr = '';
+      var pdf = await makePdfBlob(report);
+      var sent = false, sendErr = '';
 
       if (LINE_ENABLED) {
         try {
           setBusy('LINEへ送信中…');
-          const out = await sendToLine(report, pdf);
+          var out = await sendToLine(report, pdf);
           if (out && out.pdfUrl) report.pdfUrl = out.pdfUrl;
           sent = true;
-        } catch (e) {
-          console.warn('sendToLine', e);
-          sendErr = (e && e.message) ? e.message : String(e);
-        }
+        } catch (e) { sendErr = (e && e.message) ? e.message : String(e); }
       }
+      report.sent = sent;
 
-      // LINE未設定 or 送信失敗 → 端末の共有/保存にフォールバック（オフラインでも完結）
-      if (!sent) {
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          setBusy(''); try { await navigator.share({ files: [file], title: '作業報告書', text: lineText(report) }); } catch {}
-        } else {
-          const a = document.createElement('a'); a.href = URL.createObjectURL(pdf); a.download = file.name; a.click();
-        }
-      }
-
-      onDone(report);
       setBusy('');
-      alert(sent ? 'LINEへ送信し、保存しました。'
-        : (LINE_ENABLED ? `LINE送信に失敗（端末の共有/保存で対応しました）。\n\n原因: ${sendErr || '不明'}`
-                        : 'PDFを作成しました。（LINE未設定のため共有/保存で対応）'));
-      reset();
-    } catch (e) { console.error(e); setBusy(''); alert('作成に失敗しました: ' + (e.message || e)); }
+      if (!sent) await sharePdf(pdf, pdfName(report), lineText(report));
+
+      setReports(function (arr) { return [report].concat(arr); });
+      clearDraft();
+      setTab(sent ? 'history' : 'create');
+      say(sent ? 'LINEへ送信し、履歴に保存しました。'
+               : (LINE_ENABLED ? 'LINE送信に失敗（' + (sendErr || '原因不明') + '）。PDFは共有/保存しました。'
+                               : 'PDFを作成しました。'), !sent && LINE_ENABLED);
+    } catch (e) {
+      setBusy('');
+      alert('作成に失敗しました：' + ((e && e.message) || e));
+    }
   };
 
-  /* ===== ステップ① 基本情報 ===== */
-  if (step === 'info') {
-    return (
-      <div className="max-w-xl mx-auto px-4 py-4 space-y-4 pb-safe">
-        <StepBar step={1} />
-        <Section title="店舗・日時・担当">
-          <label className="block text-xs font-bold text-gray-500 mb-1">店舗</label>
-          <select value={store} onChange={e => setStore(e.target.value)} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3">
-            <option value="">選択してください</option>
-            {masters.stores.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <label className="block text-xs font-bold text-gray-500 mb-1">日付</label>
-          <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3" />
-          <label className="block text-xs font-bold text-gray-500 mb-1">作業担当者（複数可）</label>
-          <StaffPicker staff={masters.staff} value={staff} onChange={setStaff} />
-        </Section>
-        <button onClick={goItems} className="w-full bg-gray-900 hover:bg-gray-700 text-white font-bold rounded-xl py-3.5 shadow-sm">作業の入力へ →</button>
-      </div>
-    );
-  }
-
-  /* 項目の表示順：店舗の定番 → その他 → 追加(その他)項目 */
-  const extra = items.filter(it => !masters.categories.includes(it.category)); // マスタ外（その他で追加）
-  const storeDef = (masters.storeDefaults && masters.storeDefaults[store]) || [];
-  const defaultCats = masters.categories.filter(c => storeDef.includes(c));
-  const otherCats = masters.categories.filter(c => !storeDef.includes(c));
-  const orderedCats = [...defaultCats, ...otherCats, ...extra.map(it => it.category)];
-
-  /* ===== ステップ② 項目の編集画面（項目名タップで入る）===== */
-  const editing = items.find(it => it.id === editingId);
-  if (editing) {
-    const idx = orderedCats.indexOf(editing.category);
-    const hasNext = idx >= 0 && idx < orderedCats.length - 1;
-    const gotoNext = () => {
-      const cur = editing;
-      setItems(arr => arr.filter(it => it.id !== cur.id || entered(it))); // 未入力なら破棄
-      const next = orderedCats[idx + 1];
-      if (next) openCat(next); else setEditingId(null);
-    };
-    const photoMissing = !complete(editing) && entered(editing);
-    return (
-      <div className="max-w-xl mx-auto px-4 py-4 space-y-4 pb-safe">
-        <button onClick={closeEditor} className="text-sm text-blue-600 font-bold">← 項目一覧へ戻る</button>
-        <Section title={editing.category} right={<button onClick={() => delItem(editing.id)} className="text-xs text-red-500">この項目を削除</button>}>
-          <div className="flex gap-4 mb-3">
-            <PhotoRow label="施工前 *" urls={editing.before} onAdd={u => updItem(editing.id, { before: [...editing.before, u] })} onRemove={i => updItem(editing.id, { before: editing.before.filter((_, x) => x !== i) })} />
-            <PhotoRow label="施工後 *" urls={editing.after} onAdd={u => updItem(editing.id, { after: [...editing.after, u] })} onRemove={i => updItem(editing.id, { after: editing.after.filter((_, x) => x !== i) })} />
-          </div>
-          {photoMissing && <p className="text-xs text-amber-600 mb-3">※ 施工前・施工後の両方の写真が必要です（* 必須）。</p>}
-          <textarea value={editing.note} onChange={e => updItem(editing.id, { note: e.target.value })} placeholder="この作業のメモ（任意）" rows={3} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-        </Section>
-        <div className="flex gap-2">
-          <button onClick={closeEditor} className="flex-1 bg-white border border-gray-300 text-gray-700 font-bold rounded-xl py-3.5">一覧へ</button>
-          <button onClick={gotoNext} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl py-3.5 shadow-sm">{hasNext ? '次の項目へ →' : '保存して一覧へ'}</button>
-        </div>
-      </div>
-    );
-  }
-
-  /* 項目1行の表示（タップで編集画面へ）。状態＝完了(緑✓)/写真不足(橙!)/未入力(灰＋） */
-  const catRow = cat => {
-    const it = itemFor(cat), ok = complete(it), partial = entered(it) && !ok;
-    return (
-      <button key={cat} onClick={() => openCat(cat)} className={`w-full text-left rounded-xl border shadow-sm px-4 py-3.5 flex items-center justify-between ${ok ? 'bg-emerald-50 border-emerald-300' : partial ? 'bg-amber-50 border-amber-300' : 'bg-white border-gray-200'}`}>
-        <div className="flex items-center gap-2.5 min-w-0">
-          <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${ok ? 'bg-emerald-500 text-white' : partial ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-400'}`}>{ok ? '✓' : partial ? '!' : '＋'}</span>
-          <span className="font-bold truncate">{cat}</span>
-        </div>
-        <span className={`text-xs shrink-0 ml-3 ${partial ? 'text-amber-600' : 'text-gray-400'}`}>{ok ? `前${it.before.length}・後${it.after.length}` : partial ? '写真不足' : '未入力'}</span>
-      </button>
-    );
+  var reshare = async function (r) {
+    try {
+      setBusy('PDFを作成中…');
+      var pdf = await makePdfBlob(r);
+      setBusy('');
+      await sharePdf(pdf, pdfName(r), lineText(r));
+    } catch (e) { setBusy(''); alert('PDFの作成に失敗しました：' + ((e && e.message) || e)); }
   };
 
-  /* ===== ステップ② 項目一覧（タップして写真入力へ）===== */
-  return (
-    <div className="max-w-xl mx-auto px-4 py-4 space-y-3 pb-action">
-      <StepBar step={2} />
-      {/* 基本情報サマリ（タップで①へ戻って修正） */}
-      <button onClick={() => setStep('info')} className="w-full text-left bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3 flex items-center justify-between">
-        <div className="min-w-0">
-          <div className="font-bold truncate">{store}</div>
-          <div className="text-xs text-gray-500 mt-0.5">{fmtDate(date)} ・ {staff.join('、')}</div>
-        </div>
-        <span className="text-xs text-blue-600 shrink-0 ml-3">修正</span>
-      </button>
+  if (!ready) return html`<div class="empty">読み込み中…</div>`;
 
-      <p className="text-xs text-gray-400 px-1 pt-1">項目をタップして施工前・施工後の写真を追加</p>
+  var hasDraft = draftHasContent(draft);
+  return html`<div>
+    <header class="appbar"><div class="appbar-in"><span>🧰</span>店舗サポート 報告書</div></header>
 
-      {/* 店舗の定番項目（設定で店舗ごとに指定）→ 上部にまとめて表示 */}
-      {defaultCats.length > 0 && (
-        <>
-          <p className="text-[11px] font-bold text-emerald-700 px-1">★ この店舗の定番</p>
-          {defaultCats.map(catRow)}
-          {otherCats.length > 0 && <p className="text-[11px] font-bold text-gray-400 px-1 pt-1">その他の項目</p>}
-        </>
-      )}
-      {otherCats.map(catRow)}
+    ${tab === 'create' && html`<${CreateTab} masters=${masters} draft=${draft} patch=${patch} onFinish=${finish} />`}
+    ${tab === 'drafts' && html`<${DraftsTab} draft=${draft}
+        onResume=${function () { setTab('create'); }}
+        onDelete=${function () { if (confirm('作成中の下書きを削除しますか？')) { clearDraft(); say('下書きを削除しました。'); } }} />`}
+    ${tab === 'history' && html`<${HistoryTab} reports=${reports} onReshare=${reshare}
+        onDelete=${function (id) { setReports(function (a) { return a.filter(function (r) { return r.id !== id; }); }); }} />`}
+    ${tab === 'settings' && html`<${SettingsTab} masters=${masters} setMasters=${setMasters} />`}
 
-      {/* マスタ外（その他で追加した項目） */}
-      {extra.map(it => { const ok = complete(it), partial = entered(it) && !ok; return (
-        <button key={it.id} onClick={() => openCat(it.category)} className={`w-full text-left rounded-xl border shadow-sm px-4 py-3.5 flex items-center justify-between ${ok ? 'bg-emerald-50 border-emerald-300' : partial ? 'bg-amber-50 border-amber-300' : 'bg-white border-gray-200'}`}>
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${ok ? 'bg-emerald-500 text-white' : partial ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-400'}`}>{ok ? '✓' : partial ? '!' : '＋'}</span>
-            <span className="font-bold truncate">{it.category}</span>
-          </div>
-          <span onClick={e => { e.stopPropagation(); delItem(it.id); }} className="text-xs text-red-500 shrink-0 ml-3">削除</span>
-        </button>
-      ); })}
+    <nav class="tabbar"><div class="tabbar-in">
+      ${TABS.map(function (t) {
+        return html`<button key=${t[0]} class=${'tab' + (tab === t[0] ? ' on' : '')} onClick=${function () { setTab(t[0]); }}>
+          <span class="ic">${t[2]}${t[0] === 'drafts' && hasDraft && html`<span class="tab-dot"></span>`}</span>${t[1]}
+        </button>`;
+      })}
+    </div></nav>
 
-      <button onClick={addCustom} className="w-full border-2 border-dashed border-gray-300 text-gray-500 rounded-xl py-3 text-sm font-bold">＋ その他の項目を追加</button>
-
-      <Section title="特記事項">
-        <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="全体の特記事項（任意）" rows={3} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-      </Section>
-
-      {/* 完了して送信：画面下に固定（下部タブの上）→ スクロール不要でいつでも押せる */}
-      <div className="fixed left-0 right-0 z-10 px-4 pb-2 bg-gradient-to-t from-slate-100 via-slate-100/95 to-transparent pt-3" style={{ bottom: 'calc(64px + env(safe-area-inset-bottom))' }}>
-        <div className="max-w-xl mx-auto">
-          <button onClick={finish} disabled={!!busy} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-xl py-4 shadow-lg text-base">
-            {busy || '✅ 完了して送信'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+    <${Busy} msg=${busy} />
+    <${Toast} toast=${toast} />
+  </div>`;
 }
 
-/* ステップ表示 */
-function StepBar({ step }) {
-  const Item = ({ n, label }) => (
-    <div className="flex items-center gap-1.5">
-      <span className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center ${step === n ? 'bg-gray-900 text-white' : step > n ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-500'}`}>{step > n ? '✓' : n}</span>
-      <span className={`text-xs font-bold ${step === n ? 'text-gray-900' : 'text-gray-400'}`}>{label}</span>
-    </div>
-  );
-  return (
-    <div className="flex items-center justify-center gap-3 py-1">
-      <Item n={1} label="基本情報" />
-      <span className="w-6 h-px bg-gray-300" />
-      <Item n={2} label="作業項目" />
-    </div>
-  );
-}
-
-/* ---------- 履歴画面 ---------- */
-function HistoryTab({ reports, masters, onDelete }) {
-  const [view, setView] = useState(null);
-  const reshare = async r => {
-    const pdf = await makePdfBlob(r, masters);
-    const file = new File([pdf], `報告書_${r.store}_${(r.date||'').slice(0,10)}.pdf`, { type: 'application/pdf' });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: '作業報告書', text: lineText(r) }); } catch {} }
-    else { const a = document.createElement('a'); a.href = URL.createObjectURL(pdf); a.download = file.name; a.click(); }
-  };
-  if (!reports.length) return <div className="max-w-xl mx-auto px-4 py-16 text-center text-gray-400 text-sm">まだ報告書がありません。</div>;
-  return (
-    <div className="max-w-xl mx-auto px-4 py-4 space-y-3 pb-safe">
-      {reports.map(r => (
-        <div key={r.id} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-          <div className="flex justify-between items-start">
-            <div>
-              <div className="font-bold">{r.store || '（店舗未設定）'}</div>
-              <div className="text-xs text-gray-500 mt-0.5">{fmtDate(r.date)} ・ {(r.staff || []).join('、')}</div>
-              <div className="text-xs text-gray-400 mt-1">{(r.items || []).map(i => i.category).filter(Boolean).join('、')}</div>
-            </div>
-            <div className="text-right space-y-1 shrink-0 ml-3">
-              <button onClick={() => reshare(r)} className="block text-xs text-blue-600 underline">PDF共有</button>
-              {r.pdfUrl && <a href={r.pdfUrl} target="_blank" rel="noopener" className="block text-xs text-blue-600 underline">クラウド</a>}
-              <button onClick={() => { if (confirm('この報告書を削除しますか？')) onDelete(r.id); }} className="block text-xs text-red-500">削除</button>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* ---------- マスタ編集 ---------- */
-function ListEditor({ title, items, onChange, placeholder }) {
-  const [v, setV] = useState('');
-  const add = () => { const t = v.trim(); if (!t || items.includes(t)) { setV(''); return; } onChange([...items, t]); setV(''); };
-  return (
-    <Section title={title}>
-      <div className="flex gap-2 mb-3">
-        <input value={v} onChange={e => setV(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} placeholder={placeholder} className="flex-1 bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-        <button onClick={add} className="bg-gray-900 text-white rounded-lg px-4 text-sm font-bold">追加</button>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {items.length === 0 && <span className="text-xs text-gray-400">未登録</span>}
-        {items.map(n => (
-          <span key={n} className="inline-flex items-center gap-1 bg-gray-100 rounded-full pl-3 pr-1.5 py-1 text-sm">
-            {n}<button onClick={() => onChange(items.filter(x => x !== n))} className="w-5 h-5 rounded-full bg-gray-300 text-white text-xs leading-none">×</button>
-          </span>
-        ))}
-      </div>
-    </Section>
-  );
-}
-/* 並び順を変えられるリスト（項目カテゴリ用：▲▼で並べ替え） */
-function OrderedListEditor({ title, items, onChange, placeholder, note }) {
-  const [v, setV] = useState('');
-  const add = () => { const t = v.trim(); if (!t || items.includes(t)) { setV(''); return; } onChange([...items, t]); setV(''); };
-  const move = (i, d) => { const j = i + d; if (j < 0 || j >= items.length) return; const a = [...items]; [a[i], a[j]] = [a[j], a[i]]; onChange(a); };
-  return (
-    <Section title={title}>
-      {note && <p className="text-xs text-gray-400 mb-2">{note}</p>}
-      <div className="flex gap-2 mb-3">
-        <input value={v} onChange={e => setV(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} placeholder={placeholder} className="flex-1 bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-        <button onClick={add} className="bg-gray-900 text-white rounded-lg px-4 text-sm font-bold">追加</button>
-      </div>
-      <div className="space-y-2">
-        {items.length === 0 && <span className="text-xs text-gray-400">未登録</span>}
-        {items.map((n, i) => (
-          <div key={n} className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-            <span className="text-gray-400 text-xs w-5 text-center">{i + 1}</span>
-            <span className="flex-1 text-sm truncate">{n}</span>
-            <button onClick={() => move(i, -1)} disabled={i === 0} className="w-7 h-7 rounded border border-gray-300 text-gray-600 disabled:opacity-30">▲</button>
-            <button onClick={() => move(i, 1)} disabled={i === items.length - 1} className="w-7 h-7 rounded border border-gray-300 text-gray-600 disabled:opacity-30">▼</button>
-            <button onClick={() => onChange(items.filter((_, x) => x !== i))} className="text-red-500 text-xs px-1">削除</button>
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-/* 店舗ごとの定番項目（作成時にその店舗の上部へ「★定番」として表示） */
-function StoreDefaultsEditor({ stores, categories, value, onChange }) {
-  const [sel, setSel] = useState(stores[0] || '');
-  useEffect(() => { if (!stores.includes(sel)) setSel(stores[0] || ''); }, [stores]);
-  if (!stores.length) return <Section title="店舗ごとの定番項目"><p className="text-xs text-gray-400">先に店舗を登録してください。</p></Section>;
-  const cur = value[sel] || [];
-  const toggle = c => { const next = cur.includes(c) ? cur.filter(x => x !== c) : [...cur, c]; onChange({ ...value, [sel]: next }); };
-  return (
-    <Section title="店舗ごとの定番項目">
-      <p className="text-xs text-gray-400 mb-2">店舗を選び、よくやる項目をオンにすると、作成時にその店舗の上部へ「★定番」としてまとめて表示されます。</p>
-      <select value={sel} onChange={e => setSel(e.target.value)} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3">
-        {stores.map(s => <option key={s} value={s}>{s}</option>)}
-      </select>
-      <div className="flex flex-wrap gap-2">
-        {categories.length === 0 && <span className="text-xs text-gray-400">先に項目カテゴリを登録してください。</span>}
-        {categories.map(c => (
-          <button key={c} onClick={() => toggle(c)} className={`px-3 py-1.5 rounded-full text-sm border ${cur.includes(c) ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-700 border-gray-300'}`}>{cur.includes(c) ? '★ ' : ''}{c}</button>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-/* ---------- 作成中（下書き）タブ ---------- */
-function DraftsTab({ onResume, onDelete }) {
-  const [draft, setDraft] = useState(() => load('draft', null));
-  const usedItems = draft && Array.isArray(draft.items)
-    ? draft.items.filter(it => ((it.before && it.before.length) || (it.after && it.after.length)))
-    : [];
-  const hasContent = draft && (draft.store || (draft.staff && draft.staff.length) || usedItems.length || draft.note);
-
-  if (!hasContent) {
-    return <div className="max-w-xl mx-auto px-4 py-16 text-center text-gray-400 text-sm">作成中の報告書はありません。</div>;
-  }
-  const remove = () => { if (confirm('作成中の下書きを削除しますか？')) { onDelete(); setDraft(null); } };
-  return (
-    <div className="max-w-xl mx-auto px-4 py-4 space-y-3 pb-safe">
-      <div className="bg-white rounded-xl border border-amber-300 shadow-sm p-4">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">作成中</span>
-          <span className="text-xs text-gray-400">自動保存されています</span>
-        </div>
-        <div className="font-bold text-base">{draft.store || '（店舗未選択）'}</div>
-        <div className="text-xs text-gray-500 mt-0.5">{draft.date ? fmtDate(draft.date) : '-'} ・ {(draft.staff || []).join('、') || '担当未選択'}</div>
-        <div className="text-xs text-gray-500 mt-1">
-          {usedItems.length > 0 ? `作業 ${usedItems.length} 件：${usedItems.map(i => i.category).join('、')}` : '作業未入力'}
-        </div>
-        {draft.note && <div className="text-xs text-gray-500 mt-1 truncate">特記：{draft.note}</div>}
-        <div className="flex gap-2 mt-4">
-          <button onClick={onResume} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl py-3 text-sm">続きから編集</button>
-          <button onClick={remove} className="bg-white border border-red-300 text-red-500 font-bold rounded-xl px-5 text-sm">削除</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SettingsTab({ masters, setMasters }) {
-  return (
-    <div className="max-w-xl mx-auto px-4 py-4 space-y-4 pb-safe">
-      <ListEditor title="担当者" items={masters.staff} placeholder="担当者名" onChange={v => setMasters(m => ({ ...m, staff: v }))} />
-      <ListEditor title="店舗" items={masters.stores} placeholder="店舗名" onChange={v => setMasters(m => ({ ...m, stores: v }))} />
-      <OrderedListEditor title="項目カテゴリ" items={masters.categories} placeholder="カテゴリ名" note="作成画面ではこの順番で表示されます（▲▼で並べ替え）。" onChange={v => setMasters(m => ({ ...m, categories: v }))} />
-      <StoreDefaultsEditor stores={masters.stores} categories={masters.categories} value={masters.storeDefaults || {}} onChange={v => setMasters(m => ({ ...m, storeDefaults: v }))} />
-      {LINE_ENABLED
-        ? <p className="text-xs text-gray-400 px-1">LINE自動送信：有効（完了時にGAS経由で送信）。データは端末内（localStorage）に保存されます。</p>
-        : <p className="text-xs text-gray-400 px-1">ローカル保存モード。完了時のLINE自動送信を使うには index.html 上部の GAS_URL を設定してください（未設定でもPDFの共有/保存は使えます）。</p>}
-    </div>
-  );
-}
-
-function Section({ title, right, children }) {
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-      <div className="flex items-center justify-between mb-3"><h2 className="text-sm font-bold text-gray-700">{title}</h2>{right}</div>
-      {children}
-    </div>
-  );
-}
-
-/* ---------- アプリ本体 ---------- */
-function App() {
-  const [tab, setTab] = useState('create');
-  // 保存済みに初期値を足し込む（空保存・新しい端末・初期値追加すべてに対応）
-  const mergeDefaults = (saved, defaults) => {
-    const arr = Array.isArray(saved) ? saved.slice() : [];
-    defaults.forEach(d => { if (!arr.includes(d)) arr.push(d); });
-    return arr;
-  };
-  const [masters, setMasters] = useState(() => ({
-    staff: mergeDefaults(load('staff', []), DEFAULT_STAFF),
-    stores: mergeDefaults(load('stores', []), DEFAULT_STORES),
-    categories: mergeDefaults(load('categories', []), DEFAULT_CATEGORIES),
-    storeDefaults: load('storeDefaults', {}), // { 店舗名: [定番カテゴリ,...] }
-  }));
-  const [reports, setReports] = useState(() => load('reports', []));
-
-  useEffect(() => { save('staff', masters.staff); save('stores', masters.stores); save('categories', masters.categories); save('storeDefaults', masters.storeDefaults); }, [masters]);
-  useEffect(() => save('reports', reports), [reports]);
-
-  const addReport = r => setReports(arr => [r, ...arr]);
-  const delReport = id => setReports(arr => arr.filter(r => r.id !== id));
-
-  const tabs = [['create', '作成', '📝'], ['drafts', '作成中', '📋'], ['history', '履歴', '🗂'], ['settings', '設定', '⚙️']];
-  const deleteDraft = () => { try { localStorage.removeItem('ssr_draft'); } catch {} };
-  return (
-    <div className="min-h-screen">
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-20">
-        <div className="max-w-xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="font-bold flex items-center gap-2"><span>🧰</span>店舗サポート 報告書</div>
-        </div>
-      </header>
-
-      {tab === 'create' && <CreateTab masters={masters} onDone={addReport} />}
-      {tab === 'drafts' && <DraftsTab onResume={() => setTab('create')} onDelete={deleteDraft} />}
-      {tab === 'history' && <HistoryTab reports={reports} masters={masters} onDelete={delReport} />}
-      {tab === 'settings' && <SettingsTab masters={masters} setMasters={setMasters} />}
-
-      <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 z-20 nav-safe">
-        <div className="max-w-xl mx-auto grid grid-cols-4">
-          {tabs.map(([k, label, icon]) => (
-            <button key={k} onClick={() => setTab(k)} className={`py-2.5 flex flex-col items-center gap-0.5 text-xs ${tab === k ? 'text-emerald-600 font-bold' : 'text-gray-400'}`}>
-              <span className="text-lg leading-none">{icon}</span>{label}
-            </button>
-          ))}
-        </div>
-      </nav>
-    </div>
-  );
-}
-
-function Root() {
-  return <App />;
-}
-
-ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
+render(html`<${App} />`, document.getElementById('root'));
 </script>
 </body>
 </html>
